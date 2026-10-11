@@ -41,8 +41,8 @@ last sync, seen schema version). `projects` + `project_roots` separate identity 
 paths so `config/projects.toml` can group many directories into one project
 (addition #4). Event → project linking = **longest root_path prefix of the event's
 working directory**; one root covers its whole subtree, deeper roots shadow shallower
-ones. Seeding: the 12 Phase-0-observed dirs start `allowed=1` (ADR-002); projects
-discovered later are created with `allowed=0`.
+ones. Seeding: 11 of the 12 Phase-0-observed dirs start `allowed=1` (ADR-002); the
+Home catch-all starts `allowed=0` (ADR-016), as do projects discovered later.
 
 `config/projects.toml` (loaded at every sync; overrides seeds):
 
@@ -93,7 +93,7 @@ CREATE TABLE events (
   text           TEXT NOT NULL,                -- REDACTED; head+tail if truncated
   token_estimate INTEGER NOT NULL,
   truncated      INTEGER NOT NULL DEFAULT 0,
-  blob_ref       TEXT,                         -- 'data/blobs/<aa>/<sha256>' when spilled
+  blob_ref       TEXT,                         -- 'blobs/<aa>/<sha256>' relative to data dir
   raw_json       TEXT,                         -- source JSON; NULL when blob_ref set (blob IS the raw record)
   content_hash   TEXT NOT NULL,                -- sha256 of canonical source content
   UNIQUE (source, source_id)
@@ -113,9 +113,11 @@ prompt-history lines. `call_id` preserves tool-call ↔ result linkage. `content
 makes changed-source detection cheap. `raw_json` is omitted for spilled parts — the
 blob holds the full raw record, so nothing is lost by truncating `text`.
 
-**Blob policy** (ADR-004): content > 64 KB → write `data/blobs/<aa>/<sha256>`
-(fsync) **before** inserting the referencing event; `text` keeps head+tail (~4 KB
-each). Blobs are content-addressed: identical content is stored once.
+**Blob policy** (ADR-004): content > 64 K characters → write
+`data/blobs/<aa>/<sha256>` (fsync) **before** inserting the referencing event;
+`text` keeps head+tail (~4 K characters each). Blobs store **redacted** content —
+redaction precedes spilling (ADR-012) — and are content-addressed: identical
+content is stored once.
 
 ## Derived: episodes & facts (rebuildable)
 

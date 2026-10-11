@@ -129,8 +129,14 @@ Read-only Phase 0 inspection; **not parsed or imported yet**.
 Plan when built: `conversation_summaries.db` as the index (titles, workspaces,
 timestamps → sessions), `brain/` markdown artifacts as file-kind events, then
 reverse-engineer `steps.step_payload` protobuf (biggest effort, best evidence).
-Secrets found at (never ingested): `config/mcp_config.json`,
-`config/plugins/mem0/mcp_config.json`, possibly `history.jsonl` — denylist them.
+
+**Denylist (explicit, to be enforced in code when this connector is built):**
+
+- `mcp_config.json` (e.g. `~/.gemini/config/mcp_config.json`)
+- `plugins/**/mcp_config.json` (e.g. `~/.gemini/config/plugins/mem0/mcp_config.json`)
+- `history.jsonl` (`~/.gemini/antigravity-cli/history.jsonl` — pattern-matched as
+  possibly secret-bearing; contents not yet inspected)
+- `auth.json` (any credential file of that name under the source root)
 
 ## 4. VS Code (stub, later)
 

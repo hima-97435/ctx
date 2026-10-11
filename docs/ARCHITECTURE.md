@@ -108,11 +108,32 @@ class Connector(Protocol):
 - **Local-first.** DB, blobs, indexes stay in `./data/` (gitignored). Nothing
   leaves the machine in M1; later, LLM calls leave only via the provider
   abstraction, only for projects with `local_only=0`.
-- **Per-project allow.** `projects.allowed` gates search/feature visibility. Seeded
-  from the 12 Phase-0-observed dirs (ADR-002); anything new starts `allowed=0`.
-- **Redaction.** Regex-based redactor (API keys, bearer tokens, `.env` values,
-  private-key blocks) applied at ingestion *and* on any blob content at render
-  time. Fake-secrets unit tests are part of M1 acceptance.
+- **Per-project allow.** `projects.allowed` gates search/feature visibility. 11 of
+  the 12 seeded Phase-0 dirs start `allowed=1`; the Home catch-all and anything
+  discovered later start `allowed=0` (ADR-002, ADR-016).
+- **Redaction.** Regex-based redactor applied at ingestion *and* on any blob
+  content at render time. Fake-secrets unit tests are part of M1 acceptance.
+  Typed placeholders `[REDACTED:<kind>]`; redaction is idempotent. Patterns
+  (implemented in `src/ctx/core/redact.py`):
+
+  | Kind | Catches |
+  |---|---|
+  | `secret` | key/value assignments: `api_key`, `secret`, `token`, `access/refresh/auth token`, `client_secret`, `private_key`, `password` … followed by `=`/`:` and a ≥8-char value (JSON, YAML, `.env`, shell styles) |
+  | `api-key` | OpenAI-style `sk-…` |
+  | `nvapi-key` | NVIDIA `nvapi-…` |
+  | `github-token` | `ghp_/gho_/ghu_/ghs_/ghr_…` |
+  | `aws-access-key` | `AKIA…` |
+  | `google-api-key` | `AIza…` |
+  | `slack-token` | `xox[baprs]-…` |
+  | `auth-header` | `Authorization: Basic/Bearer …` headers |
+  | `bearer-token` | standalone `Bearer …` |
+  | `jwt` | `eyJ…….` three-segment JWTs |
+  | `private-key` | `-----BEGIN … PRIVATE KEY-----` blocks |
+  | `url-password` | `scheme://user:password@host` credentials |
+
+  Known limitation: `.env` values under non-secret-looking keys are not recognized
+  generically; a connector may add file-specific rules (e.g. for `.env` files)
+  without changing the shared redactor.
 - **local_only.** `LocalProvider` (Ollama) for `local_only=1` projects;
   `OpenAICompatibleProvider` (NVIDIA) only for opted-in projects (ADR-003).
 

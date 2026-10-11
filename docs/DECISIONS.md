@@ -82,3 +82,11 @@ re-checks before dispatch.
 `prompt-history.jsonl` carries no per-line timestamp; all 50 events use the file's
 mtime, order preserved via line-number `source_id`. Accepted for 50 low-value
 lines; revisit only if the file grows.
+
+### 2026-10-11 · ADR-016 · Home catch-all project starts `allowed=0` (revises ADR-002)
+Of the 12 Phase-0-observed directories, 11 start `allowed=1`; the Home catch-all
+(`/Users/himanshu`) starts `allowed=0`. Anything matching only the Home root stays
+out of search and LLM calls until the user enables specific folders in
+`config/projects.toml`. Reason: Home matches every unfiled path, so allowing it by
+default would silently expose unreviewed sessions. Supersedes the Home portion of
+ADR-002.

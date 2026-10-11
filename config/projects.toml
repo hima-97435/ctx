@@ -5,8 +5,9 @@
 #   LONGEST PREFIX of the event's working directory (so one root covers its subtree,
 #   and a deeper root on another project shadows the shallower one).
 # - `allowed = true` makes a project searchable and usable by features.
-#   The 12 directories observed during Phase 0 were explicitly approved (ADR-002)
-#   and start allowed; any project discovered later starts allowed = false.
+#   11 of the 12 directories observed during Phase 0 were explicitly approved
+#   (ADR-002) and start allowed; the Home catch-all starts disallowed (ADR-016)
+#   and any project discovered later starts allowed = false.
 # - `local_only` (default true) forbids cloud LLM calls for that project (ADR-003).
 
 [projects.sar-images]
@@ -67,7 +68,7 @@ roots = [
 
 [projects.home]
 name = "Home (unfiled sessions)"
-allowed = true
+allowed = false
 roots = [
     "/Users/himanshu",
 ]
