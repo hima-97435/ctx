@@ -235,7 +235,7 @@ def test_sensitive_read_output_redacted(tmp_path, ro_conn):
 def test_dry_run_report_counts(tmp_path):
     fixture = _fixture_db(tmp_path / "opencode.db")
     report = oc.dry_run_report(fixture, source_root=tmp_path, denylist_paths=("auth.json",))
-    assert report.schema_version == "drizzle:deadbeefcafe"
+    assert report.schema_version == "drizzle:202604230708"
     assert (report.sessions, report.messages, report.parts) == (1, 2, 7)
     assert report.skipped_parts == 1  # step-start
     assert report.parts_by_type["tool"] == 3
