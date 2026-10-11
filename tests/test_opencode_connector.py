@@ -37,7 +37,10 @@ def _fixture_db(path: Path) -> Path:
         CREATE TABLE credential (id TEXT PRIMARY KEY, value TEXT);
         """
     )
-    conn.execute("INSERT INTO __drizzle_migrations VALUES (1, 'deadbeefcafe1234', 0, '0001', 'x')")
+    conn.execute(
+        "INSERT INTO __drizzle_migrations VALUES"
+        " (1, NULL, 0, '20260423070820_add_icon_url_override', 'x')"
+    )
     model = json.dumps({"id": "glm-5.3-flash", "providerID": "nvidia"})
     conn.execute(
         "INSERT INTO session VALUES"
@@ -122,7 +125,7 @@ def ro_conn(fixture_db):
 
 def test_check_version_ok_and_marker(ro_conn):
     version = oc.check_version(ro_conn)
-    assert version == "drizzle:deadbeefcafe"
+    assert version == "drizzle:202604230708"  # hash is NULL in real DBs; name is used
 
 
 def test_check_version_fails_loud_on_unknown_schema(tmp_path):

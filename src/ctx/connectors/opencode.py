@@ -104,8 +104,12 @@ def check_version(conn: sqlite3.Connection) -> str:
             "OpenCode schema unrecognized; failing loud, nothing was written: "
             + "; ".join(problems)
         )
-    row = conn.execute("SELECT hash FROM __drizzle_migrations ORDER BY id DESC LIMIT 1").fetchone()
-    return f"drizzle:{(row['hash'] or '')[:12]}" if row else "drizzle:unknown"
+    row = conn.execute(
+        "SELECT hash, name FROM __drizzle_migrations ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return "drizzle:unknown"
+    return f"drizzle:{(row['hash'] or row['name'] or '')[:12]}"
 
 
 def open_readonly(
