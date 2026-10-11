@@ -160,15 +160,25 @@ def is_sensitive_file(path: str | Path) -> bool:
     return any(fnmatch.fnmatch(name, pattern) for pattern in SENSITIVE_FILE_PATTERNS)
 
 
-def redact_file_text(path: str | Path, text: str) -> str:
+def redact_file_text_counted(path: str | Path, text: str) -> tuple[str, dict[str, int]]:
     """Redact ALL values in a sensitive file's content, given its path.
 
     `.env`/`.env.*`/`credentials`: every key/value line is redacted regardless of
     the key name. `*.pem`/`*.key`: the entire content is replaced. The connector
     calls this with the file path when it detects such a file was read.
+    Returns (redacted text, match counts per placeholder kind).
     """
     name = Path(path).name
     if fnmatch.fnmatch(name, "*.pem") or fnmatch.fnmatch(name, "*.key"):
-        return "[REDACTED:key-file]"
-    redacted = _ENV_LINE.sub(r"\g<keep>[REDACTED:env-value]", text)
-    return redact(redacted)
+        return "[REDACTED:key-file]", {"key-file": 1}
+    redacted, n = _ENV_LINE.subn(r"\g<keep>[REDACTED:env-value]", text)
+    counts: dict[str, int] = {"env-value": n} if n else {}
+    redacted, more = redact_counted(redacted)
+    for kind, count in more.items():
+        counts[kind] = counts.get(kind, 0) + count
+    return redacted, counts
+
+
+def redact_file_text(path: str | Path, text: str) -> str:
+    """Redact ALL values in a sensitive file's content, given its path."""
+    return redact_file_text_counted(path, text)[0]
