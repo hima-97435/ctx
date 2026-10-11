@@ -1,0 +1,21 @@
+# ctx runtime data — never commit (contains imported personal context and secrets)
+/data/
+
+# environment / secrets
+.env
+.env.*
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,73 @@
+# ctx project configuration.
+#
+# Groups directories into projects and overrides seeded defaults.
+# - `roots` are absolute paths; an event is linked to the project whose root is the
+#   LONGEST PREFIX of the event's working directory (so one root covers its subtree,
+#   and a deeper root on another project shadows the shallower one).
+# - `allowed = true` makes a project searchable and usable by features.
+#   The 12 directories observed during Phase 0 were explicitly approved (ADR-002)
+#   and start allowed; any project discovered later starts allowed = false.
+# - `local_only` (default true) forbids cloud LLM calls for that project (ADR-003).
+
+[projects.sar-images]
+name = "SAR Images"
+allowed = true
+roots = [
+    "/Users/himanshu/Desktop/SAR Images",
+]
+
+[projects.minor]
+name = "Minor"
+allowed = true
+roots = [
+    "/Users/himanshu/Desktop/Minor",
+]
+
+[projects.speech2speech-midsem]
+name = "Speech2Speech mid-sem"
+allowed = true
+roots = [
+    "/Users/himanshu/Projects/Speech2Speech[ 🗣️2🗣️]/mid-sem",
+]
+
+[projects.pattern-phase-3]
+name = "Pattern Phase-3"
+allowed = true
+roots = [
+    "/Users/himanshu/Desktop/coding/Pattern/Phase-3",
+]
+
+[projects.stat-state-assignment]
+name = "State Assignment"
+allowed = true
+roots = [
+    "/Users/himanshu/Desktop/coding/stat/State Assignment",
+]
+
+[projects.hertz-dev]
+name = "hertz-dev"
+allowed = true
+roots = [
+    "/Users/himanshu/Projects/hertz-dev",
+]
+
+[projects.nlp-lab]
+name = "NLP Lab"
+allowed = true
+roots = [
+    "/Users/himanshu/Desktop/coding/NLP Lab",
+]
+
+[projects.ctx]
+name = "ctx"
+allowed = true
+roots = [
+    "/Users/himanshu/Projects/ctx",
+]
+
+[projects.home]
+name = "Home (unfiled sessions)"
+allowed = true
+roots = [
+    "/Users/himanshu",
+]
