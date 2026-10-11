@@ -70,3 +70,21 @@ def test_redact_before_spill_so_blobs_hold_no_secrets(tmp_path):
     assert "supersecretvalue123" not in p.text
     assert "supersecretvalue123" not in store.read(p.blob_ref)
     assert "[REDACTED:secret]" in p.text
+
+
+def test_deep_secret_redacted_in_blob_and_kept_text(tmp_path):
+    """A secret located deep inside oversized input is gone from the blob AND
+    from the head/tail text that enters the index (ADR-017)."""
+    store = BlobStore(tmp_path)
+    secret = "AKIAIOSFODNN7EXAMPLE"
+    content = "A" * 40_000 + f" token={secret} " + "B" * 40_000  # ~80K chars
+    p = prepare_text(redact(content), blob_store=store)
+    assert p.truncated is True
+    assert p.token_estimate == estimate_tokens(p.text)
+    assert len(p.text) < len(content)
+    # secret is far beyond the kept head (4K) and tail (4K)
+    assert secret not in p.text
+    # and gone from the redacted blob copy
+    blob = store.read(p.blob_ref)
+    assert secret not in blob
+    assert "[REDACTED:aws-access-key]" in blob

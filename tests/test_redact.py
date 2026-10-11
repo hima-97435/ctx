@@ -1,6 +1,8 @@
+import time
+
 import pytest
 
-from ctx.core.redact import redact
+from ctx.core.redact import is_sensitive_file, redact, redact_file_text
 
 # (text, secret substring that must not survive redaction)
 MUST_REDACT = [
@@ -26,6 +28,11 @@ MUST_REDACT = [
         "eyJhbGciOiJIUzI1NiJ9",
     ),
     ("postgres://admin:supersecretpw@db.example.com/x", "supersecretpw"),
+    ("sk-ant-api03-fakefakefakefakefake123456", "sk-ant-api03-fakefake"),
+    ("sk_live_FAKEFAKEFAKEFAKEFAKE", "sk_live_FAKEFAKE"),
+    ("rk_live_FAKEFAKEFAKEFAKEFAKE", "rk_live_FAKEFAKE"),
+    ("npm_FAKEFAKEFAKEFAKEFAKEFAKE12", "npm_FAKEFAKEFAKE"),
+    ("hf_FAKEFAKEFAKEFAKEFAKEFAKE12", "hf_FAKEFAKEFAKE"),
     (
         "-----BEGIN RSA PRIVATE KEY-----\n"
         "MIIEpAIBAAKCAQEAfakefakefake\n"
@@ -78,3 +85,86 @@ def test_redaction_is_idempotent():
     text = "\n".join(text for text, _ in MUST_REDACT)
     once = redact(text)
     assert redact(once) == once
+
+
+def test_anthropic_typed_before_generic_sk():
+    out = redact("key: sk-ant-api03-fakefakefakefakefake123456")
+    assert "[REDACTED:anthropic-key]" in out
+    assert "[REDACTED:api-key]" not in out
+
+
+def test_is_sensitive_file():
+    assert is_sensitive_file("/a/b/.env")
+    assert is_sensitive_file("/a/b/.env.local")
+    assert is_sensitive_file("credentials")
+    assert is_sensitive_file("/x/server.pem")
+    assert is_sensitive_file("id_ed25519.key")
+    assert not is_sensitive_file("/x/notes.txt")
+    assert not is_sensitive_file("/x/credentials.json")
+
+
+def test_env_file_redacts_all_values():
+    text = (
+        "DATABASE_URL=postgres://u:p@h/db\n"
+        "DEBUG=true\n"
+        "# a comment stays\n"
+        "EMPTY=\n"
+        'export API_THING="abcdefgh123"\n'
+    )
+    out = redact_file_text("/proj/.env", text)
+    assert "postgres://u:p@h/db" not in out
+    assert "abcdefgh123" not in out
+    assert "DEBUG=[REDACTED:env-value]" in out
+    assert "EMPTY=" in out
+    assert "# a comment stays" in out
+    assert "export API_THING=[REDACTED:env-value]" in out
+
+
+def test_env_dot_local_is_sensitive():
+    out = redact_file_text("/proj/.env.local", "MY_WEIRD_KEY=somevalue12345")
+    assert "somevalue12345" not in out
+    assert "[REDACTED:env-value]" in out
+
+
+def test_credentials_ini_redacted():
+    text = (
+        "[default]\n"
+        "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
+        "aws_secret_access_key = wJalrXUtnFEMI\n"
+    )
+    out = redact_file_text("credentials", text)
+    assert "AKIAIOSFODNN7EXAMPLE" not in out
+    assert "wJalrXUtnFEMI" not in out
+    assert "[REDACTED:env-value]" in out
+    assert "[default]" in out
+
+
+def test_key_file_content_replaced_wholesale():
+    pem = "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\ntrailing"
+    assert redact_file_text("/etc/ssl/server.pem", pem) == "[REDACTED:key-file]"
+    assert redact_file_text("id_rsa.key", "random secret material") == "[REDACTED:key-file]"
+
+
+def _adversarial_5mb() -> str:
+    parts = [
+        ("sk-" + "a" * 19 + " ") * 60_000,  # near-miss keys, boundary failures
+        ("token" + "b" * 400 + " ") * 1_500,  # lazy-prefix stress
+        ("-----BEGIN PRIVATE KEY-----\n" + "c" * 100 + "\n") * 3_000,  # unterminated PEM
+        ("postgres://user:" + "d" * 150 + "/x ") * 2_000,  # URL near-miss
+        "AKIAIOSFODNN7EXAMPLE deep in the middle ",
+    ]
+    text = "".join(parts)
+    pad = 5 * 1024 * 1024 - len(text)
+    if pad > 0:
+        text += "Z" * pad
+    assert len(text) >= 5 * 1024 * 1024
+    return text
+
+
+def test_adversarial_5mb_redacts_quickly():
+    text = _adversarial_5mb()
+    start = time.perf_counter()
+    out = redact(text)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0, f"redaction of 5MB adversarial input took {elapsed:.2f}s"
+    assert "AKIAIOSFODNN7EXAMPLE" not in out

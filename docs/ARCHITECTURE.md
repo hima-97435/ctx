@@ -119,7 +119,11 @@ class Connector(Protocol):
   | Kind | Catches |
   |---|---|
   | `secret` | key/value assignments: `api_key`, `secret`, `token`, `access/refresh/auth token`, `client_secret`, `private_key`, `password` … followed by `=`/`:` and a ≥8-char value (JSON, YAML, `.env`, shell styles) |
-  | `api-key` | OpenAI-style `sk-…` |
+  | `api-key` | OpenAI-style `sk-…` (runs after `anthropic-key` so `sk-ant-…` types correctly) |
+  | `anthropic-key` | `sk-ant-…` |
+  | `stripe-key` | `sk_live_/rk_live_…` (and `sk_test_/rk_test_`) |
+  | `npm-token` | `npm_…` |
+  | `huggingface-token` | `hf_…` |
   | `nvapi-key` | NVIDIA `nvapi-…` |
   | `github-token` | `ghp_/gho_/ghu_/ghs_/ghr_…` |
   | `aws-access-key` | `AKIA…` |
@@ -128,12 +132,17 @@ class Connector(Protocol):
   | `auth-header` | `Authorization: Basic/Bearer …` headers |
   | `bearer-token` | standalone `Bearer …` |
   | `jwt` | `eyJ…….` three-segment JWTs |
-  | `private-key` | `-----BEGIN … PRIVATE KEY-----` blocks |
+  | `private-key` | `-----BEGIN … PRIVATE KEY-----` blocks (match window bounded) |
   | `url-password` | `scheme://user:password@host` credentials |
 
-  Known limitation: `.env` values under non-secret-looking keys are not recognized
-  generically; a connector may add file-specific rules (e.g. for `.env` files)
-  without changing the shared redactor.
+  File-aware redaction: for files named `.env`, `.env.*`, `credentials`, `*.pem`,
+  `*.key` the connector applies `redact_file_text(path, text)` — every key/value
+  line is redacted (key names are not inspected), and `*.pem`/`*.key` contents are
+  replaced wholesale. This closes the generic key-name limitation for files whose
+  names mark them sensitive.
+
+  Known limitation: `.env`-style values under non-secret-looking keys in files
+  *not* matching the sensitive names above are not recognized generically.
 - **local_only.** `LocalProvider` (Ollama) for `local_only=1` projects;
   `OpenAICompatibleProvider` (NVIDIA) only for opted-in projects (ADR-003).
 

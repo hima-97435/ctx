@@ -90,3 +90,12 @@ out of search and LLM calls until the user enables specific folders in
 `config/projects.toml`. Reason: Home matches every unfiled path, so allowing it by
 default would silently expose unreviewed sessions. Supersedes the Home portion of
 ADR-002.
+
+### 2026-10-11 · ADR-017 · Redact then spill; blobs are redacted copies, not byte-exact
+Pipeline order is parse → **redact** → truncate/spill: the full content written to
+`data/blobs/` is the *redacted* copy of the source content, not a byte-exact raw
+record. Alternatives: spill raw and re-redact at every use (secrets would persist
+on disk; one missed re-redaction leaks), or truncate-then-redact (the blob would
+hold the unredacted middle). Reason: ctx must never persist secrets anywhere;
+byte-exact fidelity is sacrificed only where redaction matched. The
+re-redaction-on-display invariant (ADR-012) remains as belt-and-braces.
