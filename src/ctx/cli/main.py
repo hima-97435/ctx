@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from ctx.connectors.registry import available_connectors
+from ctx.connectors.registry import available_connectors, export_connector
 from ctx.core import paths
 from ctx.core.context import build_context
 from ctx.core.db import connect
@@ -122,6 +122,48 @@ def sync(
             configs = load_projects_config(paths.config_path())
             results = run_sync(
                 conn, connectors, only=source or None, project_configs=configs, full=full
+            )
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    _print_results(results)
+    if any(r.status == "error" for r in results):
+        raise typer.Exit(1)
+
+
+@app.command("import")
+def import_cmd(
+    kind: str = typer.Argument(..., help="chatgpt | claude-ai | gemini"),
+    path: Path = typer.Argument(..., help="Official export: a .zip or an extracted folder."),
+    dry_run_flag: bool = typer.Option(False, "--dry-run", help="Report only; write nothing."),
+    full: bool = typer.Option(False, "--full", help="Ignore incremental state."),
+) -> None:
+    """Import an official web-chat export (ChatGPT, Claude.ai, Gemini/Takeout).
+
+    The export is read in place (zip members are never extracted) and re-importing the
+    same or a newer export adds only new messages. Exports dropped in
+    `<CTX_HOME>/imports/<source>/` are picked up by plain `ctx sync`.
+    """
+    path = path.expanduser()
+    if not path.exists():
+        raise _fail(f"{path} does not exist")
+    try:
+        connector = export_connector(kind, path.resolve())
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    name = connector.name
+    try:
+        if dry_run_flag:
+            results = dry_run({name: connector}, only=[name], source_paths={name: path.resolve()})
+        else:
+            conn = connect(paths.db_path())
+            configs = load_projects_config(paths.config_path())
+            results = run_sync(
+                conn,
+                {name: connector},
+                only=[name],
+                source_paths={name: path.resolve()},
+                project_configs=configs,
+                full=full,
             )
     except ValueError as exc:
         raise _fail(str(exc)) from exc

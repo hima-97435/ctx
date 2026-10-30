@@ -43,6 +43,11 @@ def blobs_dir() -> Path:
     return data_dir() / "blobs"
 
 
+def imports_dir() -> Path:
+    """Watch directory for official web-chat exports (`imports/<source>/*.zip`)."""
+    return data_dir() / "imports"
+
+
 def tmp_dir() -> Path:
     return data_dir() / "tmp"
 

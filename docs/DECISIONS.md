@@ -210,3 +210,29 @@ Doctor's FTS check compares `events` with `events_fts_docsize` (an external-cont
 FTS `count(*)` just reads `events`); fix is `ctx reindex`. (7) `ctx sync` prints a
 per-source table (sessions+, events+, duplicates, skipped, unchanged, warnings,
 schema) replacing the one-line-per-source format.
+
+### 2026-10-31 · ADR-025 · Web chat history through official data exports
+Revises the VISION non-goal ("no full browser history"): that stays true, and **exports
+are not browser history**. The user downloads the services' own data export (ChatGPT,
+Claude.ai, Google Takeout > Gemini Apps) and ctx imports the file; no scraping, no
+browser access, no network. A browser extension for live capture is deferred (roadmap
+M1.7), not rejected; it needs its own threat model. Choices: (1) Connectors `chatgpt`,
+`claude_ai`, `gemini` share `webexport_common.py` (source-neutral archive and denylist
+handling, rule 6). (2) Zips are read in memory with `zipfile`, never extracted;
+denylisted members (`user.json`, `users.json`, `message_feedback.json`, account/auth
+files) are refused before being opened, and the Gemini connector selects members by path
+so other Takeout products are not read. (3) `allowed_paths` is the watch dir
+`<CTX_HOME>/imports/<source>/`; `ctx import` adds the explicit user-supplied path as an
+extra allowed path for that run (the alternative, copying the zip into `imports/`,
+doubles disk use and keeps sensitive archive members on disk). (4) ChatGPT: import the
+canonical branch only; alternates are skipped and counted. They are regenerated/edited-
+away drafts that would pollute search; nothing is lost, the export still has them, and
+`events` stays append-only so a later canonical-branch change adds events and never
+rewrites old ones. (5) Edited messages in a later export keep their first-imported text
+(`INSERT OR IGNORE`, rule 1). (6) Gemini sessions are synthesized by a 30-minute gap rule
+because Takeout has no conversation ids; ids derive from time + prompt text. (7) Web
+chats are never project-linked (no cwd; title/keyword mapping rejected as non-
+deterministic guessing, rule 7). Claude.ai `projects.json` is surfaced only as
+`agent=project:<name>`. (8) Newest archive is processed first so its session metadata
+wins; unchanged archives are skipped via the size+mtime cursor (ADR-024). (9) Formats
+are reconstructed from public descriptions and verified only on synthetic fixtures.

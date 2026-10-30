@@ -34,7 +34,9 @@ only through one context-assembly seam, with evidence links back to raw events.
 ## Non-goals
 
 - No knowledge graph, no vector DB server, no Docker, no GUI (v1).
-- No network traffic interception, no keystroke capture, no full browser history.
+- No network traffic interception, no keystroke capture, no full browser history
+  (web AI chats come only from the user's own official data exports, ADR-025; a browser
+  extension is deferred, not rejected).
 - No cloud sync, no multi-user, no hosted anything.
 - No fully-automated "memory" that asserts things I didn't decide: synthesized facts
   carry status (`suggested | confirmed | abandoned`) and must cite evidence.

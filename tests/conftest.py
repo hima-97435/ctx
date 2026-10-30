@@ -13,5 +13,7 @@ def _isolate_ctx_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CTX_SOURCE_ROOT_HERMES", str(tmp_path / "no_hermes"))
     monkeypatch.setenv("CTX_SOURCE_ROOT_DEVIN", str(tmp_path / "no_devin"))
     monkeypatch.setenv("CTX_SOURCE_ROOT_ANTIGRAVITY_CLI", str(tmp_path / "no_agy"))
+    for name in ("CHATGPT", "CLAUDE_AI", "GEMINI"):
+        monkeypatch.setenv(f"CTX_SOURCE_ROOT_{name}", str(tmp_path / f"no_{name.lower()}"))
     for var in ("HERMES_HOME", "CHISEL_SESSION_DB", "AGY_CONVERSATIONS_DIR"):
         monkeypatch.delenv(var, raising=False)

@@ -302,6 +302,97 @@ skipped and counted.
 
 ---
 
+## 6. Web chat exports (ChatGPT, Claude.ai, Gemini) - source names `chatgpt`, `claude_ai`, `gemini`
+
+Code: `src/ctx/connectors/{webexport_common,chatgpt_export,claude_ai_export,gemini_takeout}.py`.
+Formats are the services' official data exports, reconstructed from public descriptions
+and **only tested on synthetic real-shaped fixtures**; if a real export contradicts
+this, stop and report. Exports are not browser history and ctx never touches a browser.
+
+**Input.** `ctx import <chatgpt|claude-ai|gemini> PATH` where PATH is the downloaded
+`.zip` or an extracted folder; the path becomes an allowed path for that run only.
+Plain `ctx sync` scans `<CTX_HOME>/imports/<chatgpt|claude_ai|gemini>/` (override with
+`CTX_SOURCE_ROOT_<NAME>`) for `*.zip` and extracted folders, newest first; a missing
+directory is `not installed` (exit 0), an empty one imports nothing. Zips are read with
+`zipfile` in memory, never extracted; zip members are size-capped (1 GiB). A `.zip` in
+the watch dir with no recognised data is ignored with a warning; a corrupt zip, invalid
+JSON or an unrecognised structure fails loud before anything is written.
+
+**Common behavior.** Content is redacted, then oversized content spills to a blob.
+Sessions have no `cwd`, so web chats are never linked to a project (no title/keyword
+mapping, rule 7). Incremental cursor: size+mtime of the zip (or of the data files of an
+extracted folder). Re-importing the same or a newer, larger export creates zero
+duplicates: `source_id` derives from the conversation + message ids, and existing events
+are never updated (an edited message in a later export keeps its first-imported text).
+Members matching `denylist_paths` are refused before they are opened.
+
+### 6a. ChatGPT (`chatgpt`, pin `chatgpt-export-v1`)
+
+How to export: ChatGPT > profile menu > Settings > Data controls > Export data >
+Confirm; open the emailed link and download the zip (the link expires after ~24 h).
+
+- Reads only `conversations.json` or the shards `conversations-000.json`, ... (all
+  shards; conversations repeated across shards are de-duplicated). Never read:
+  `user.json`, `message_feedback.json`, `*account*.json`, `*auth*.json`; `chat.html`,
+  `shared_conversations.json` and media are ignored.
+- Each conversation's `mapping` is a tree. The **canonical branch** (`current_node` back
+  to the root) is the thread. Other branches (regenerated answers, edited-away prompts)
+  are **skipped** and counted as `alternate_branch_message`. Without a valid
+  `current_node` the newest leaf is used (`no_current_node`). Parent cycles terminate.
+- One event per message, `source_id = <conversation id>:<message id>`. user/assistant
+  keep their role; system and tool messages have role NULL (system = `synthetic`).
+  Hidden messages (`is_visually_hidden_from_conversation`) and empty ones are skipped.
+- content_type mapping: `text`, `multimodal_text` (images -> `[image: WxH]`, audio ->
+  `[audio]`, transcriptions kept) -> `text`; an assistant message addressed to a tool
+  (`recipient` not `all`) -> `tool:<recipient>`; `code` -> `tool:code`/`tool:<recipient>`;
+  `execution_output`, `tether_browsing_display`, `tether_quote`, `system_error`, any
+  `tool` role -> `tool_result`; `thoughts`, `reasoning_recap` -> `reasoning`;
+  `user_editable_context` / `model_editable_context` (profile and memory dumps) are
+  skipped. Any other type is skipped and counted `unknown_content_type:<type>`.
+- Session: id = conversation id, title, create/update time, model = last assistant
+  `model_slug`.
+
+### 6b. Claude.ai (`claude_ai`, pin `claude-ai-export-v1`)
+
+How to export: claude.ai > profile menu > Settings > Privacy > Export data; open the
+emailed link and download the zip.
+
+- Reads `conversations.json` and (metadata only) `projects.json`. Never read:
+  `users.json`, `*account*.json`, `*auth*.json`.
+- One event per content block, `source_id = <conv uuid>:<message uuid>:<block index>`;
+  `human` -> user, `assistant` -> assistant, other senders skipped. Blocks: `text`,
+  `thinking` (-> `reasoning`), `tool_use` (-> `tool:<name>`), `tool_result`, `image` /
+  `document` (placeholder `file`); unknown block types counted. If a message has no
+  usable `content` blocks its `text` field is used. `attachments[].extracted_content`
+  and `files[]` become `file` events (`att<i>`, `file<i>`).
+- If a conversation's `project_uuid` is found in `projects.json`, the session `agent` is
+  `project:<name>`. This is display metadata only; no ctx project is linked and project
+  documents are not imported.
+
+### 6c. Gemini (`gemini`, pin `gemini-takeout-v1`)
+
+How to export: takeout.google.com > Deselect all > tick **My Activity** > "All activity
+data included" > choose only **Gemini Apps** > format **JSON** (HTML also works) >
+Create export, then download the zip.
+
+- Reads only `.../Gemini Apps/MyActivity.json` (else `MyActivity.html`, parsed with
+  the stdlib `html.parser`; English labels, i.e. the `Prompted` prefix). A folder named
+  `Gemini Apps`, `Gemini` or `Bard` is required inside a Takeout zip, so other My Activity
+  products (Search, YouTube) and the rest of the Takeout are never read; JSON entries
+  whose `header`/`products` name another product are skipped.
+- Each `Prompted ...` activity is a user event plus, if `safeHtmlItem` exists, an
+  assistant event (HTML converted to text). Other activities (`Used Gemini Apps`, ...)
+  are counted as `non_prompt_activity`. HTML times in `UTC`/`GMT+hh:mm` are converted;
+  any other zone is treated as UTC with a warning.
+- **Sessions are synthetic:** Takeout has no conversation ids, so activities sorted by
+  time start a new session when the gap to the previous one exceeds 30 minutes
+  (`SESSION_GAP_MS`). Session id = `g<first activity epoch ms>`; event id =
+  `<sha256(time|prompt)[:16]>:prompt|response`. A superset export that bridges two
+  earlier sessions makes new events join the merged session while stored events keep
+  their old one.
+
+---
+
 ## 3. Antigravity CLI (`agy`, source name `antigravity_cli`)
 
 Code: `src/ctx/connectors/antigravity_cli.py`. **Not the Antigravity IDE.** Earlier

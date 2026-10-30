@@ -1,7 +1,7 @@
 # ctx
 
 A **local-first personal context engine**. ctx collects your scattered work context —
-coding-agent sessions (OpenCode, Claude Code, Codex CLI, Hermes, Devin CLI and the Antigravity CLI today; Gemini CLI, Antigravity IDE, VS Code, shell history later) —
+coding-agent sessions (OpenCode, Claude Code, Codex CLI, Hermes, Devin CLI and the Antigravity CLI today, plus ChatGPT/Claude.ai/Gemini via their official data exports; Gemini CLI, Antigravity IDE, VS Code, shell history later) —
 into one SQLite database on your machine, and builds search, a timeline,
 evidence-backed Q&A, and agent handoffs on top of it.
 
@@ -52,6 +52,22 @@ row per source: sessions/events added, duplicates, skipped records, unchanged
 files/databases skipped by incremental state, and warnings. Unchanged JSONL files and
 SQLite databases are not re-read; the state is derived and safe to delete.
 
+### Web chat history (official exports)
+
+ctx imports ChatGPT, Claude.ai and Gemini history from the data export each service
+lets you download. No scraping, no browser access, no network.
+
+```sh
+ctx import chatgpt   ~/Downloads/<chatgpt-export>.zip   # or an extracted folder
+ctx import claude-ai ~/Downloads/<claude-export>.zip
+ctx import gemini    ~/Downloads/takeout-<...>.zip       # Takeout with My Activity > Gemini Apps
+```
+
+Or drop the zips into `<CTX_HOME>/imports/{chatgpt,claude_ai,gemini}/` and run plain
+`ctx sync`. Zips are read in place (nothing is extracted); re-importing the same or a
+newer export adds only new messages. Web chats are not linked to any project. Step-by-
+step export instructions per service: `docs/CONNECTORS.md` sections 6a-6c.
+
 ### MCP server (use ctx as memory from any coding agent)
 
 ```
@@ -87,6 +103,7 @@ CLI surface grows per milestone — see `docs/ROADMAP.md`.
 | M1 — OpenCode import, search, `build_context` | implemented; prompt-history connector and `sources add` pending |
 | M1.5 — Claude Code + Codex connectors | implemented (`ctx sync --source claude_code\|codex`); Codex unverified on real files |
 | M1.6 — Hermes, Devin CLI, Antigravity CLI connectors | implemented (`ctx sync --source hermes\|devin\|antigravity_cli`); formats unofficial, checked on one real install; Antigravity protobuf conversations unreadable |
+| M1.7 — Web export connectors (ChatGPT, Claude.ai, Gemini Takeout) | implemented (`ctx import <chatgpt\|claude-ai\|gemini> PATH`); synthetic fixtures only, unverified on real exports |
 | M6 — MCP server (`ctx serve-mcp`) | implemented (pulled forward) |
 | M2+ — timeline, handoff, synthesis | planned |
 

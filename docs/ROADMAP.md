@@ -73,6 +73,19 @@ Later in this family: Hermes, Gemini CLI.
       `--source X` on an absent source is an error (ADR-024).
 - [x] Incremental sync (`sync_state`), `ctx sync --full`, `ctx status`, `ctx doctor` (ADR-024).
 
+## M1.7 — Web chat history via official exports
+
+- [x] `chatgpt`, `claude_ai`, `gemini` connectors over the zips users download
+      (ChatGPT "Export data", Claude.ai export, Google Takeout > My Activity > Gemini
+      Apps); zips read in place, denylisted members never opened, contract suite green.
+- [x] `ctx import <chatgpt|claude-ai|gemini> PATH` and the watch dir
+      `<CTX_HOME>/imports/<source>/` scanned by plain `ctx sync` (ADR-025).
+- [x] Superset re-import adds only new messages; web chats stay unlinked to projects.
+- [ ] Verify against real exports (only synthetic, real-shaped fixtures so far);
+      localized Takeout folder names / HTML labels are unsupported.
+- [ ] **Later, not scheduled:** a browser extension for live capture of web chats. It
+      would need its own threat model and ADR; exports are the only web path today.
+
 ## M2 — Timeline & episodes (deterministic, no LLM)
 
 - [ ] Episodes computed deterministically (same project + < 45 min idle gap,
