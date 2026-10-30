@@ -156,3 +156,29 @@ reads source storage read-only as `ctx sync` does. (6) `ctx mcp config` prints
 snippets and never writes client config (rule 10); only Claude Code's is verified.
 (7) Uses `mcp` 2.x `MCPServer` (renamed from v1 `FastMCP`). Roadmap: M6 pulled ahead of
 M2; timeline tool deferred.
+
+### 2026-10-31 · ADR-023 · Hermes, Devin CLI and Antigravity CLI connectors (M1.6)
+Three more sources on the existing contract, observed on one real install each
+(formats unofficial; shapes in `docs/CONNECTORS.md`). Choices: (1) **WAL-safe open**
+(`sqlite_common.py`): `mode=ro` first because it sees uncheckpointed WAL rows;
+`immutable=1` only when `mode=ro` cannot open the file and no non-empty `-wal` exists,
+else fail loud. A real Hermes DB (WAL mode, no `-wal`/`-shm` on disk) cannot be
+opened `mode=ro`; `immutable=1` on the live Devin DB silently lost 27 of 3,579 rows,
+which is why it is never a blanket choice. (2) **Hermes profiles** are namespaced
+(`<profile>/<id>`) in both session and event ids, since integer message ids restart
+per DB; sessions of every DB are yielded before any event. (3) **Devin** `message_nodes`
+carries ~2.8 copies per `message_id` (compaction/branching); first node wins, because
+events are immutable; the `transcripts/*.json` export is not read (partial, redundant)
+and `tool_call_state` is denylisted (duplicates node content). (4) **Antigravity**:
+only the CLI (`~/.gemini/antigravity-cli`) is implemented; the IDE is a different tree
+and stays documented-only (CONNECTORS section 3 was split accordingly). The protobuf
+conversation DBs are never opened (no public schema); the plain-JSONL
+`transcript_full.jsonl` is the source, `conversation_summaries.db` +
+`last_conversations.json` give titles and project linking. Transcripts have no tool
+call ids, so results are paired FIFO with the preceding planner calls (always 1:1 in
+observed data) to carry a synthetic `call_id` and apply `.env` file-aware redaction.
+A `RUNNING` step is skipped only as the last line of a file. (5) Project linking uses
+only stored cwd/workspace values (rule 7); Hermes sessions without `cwd` stay
+unlinked. (6) `ctx sync` with no `--source` now reports an error for each source whose
+storage is not installed (same as Codex before); making absence a `skipped` status is
+left as a roadmap item. `ctx mcp config --client hermes` already existed (unverified).

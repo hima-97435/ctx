@@ -16,7 +16,11 @@ come from a read-only Phase 0 inspection (2026-10-11, macOS 26.5.2, OpenCode 1.1
 - Must pass the shared contract suite (`tests/connector_contract.py`): idempotent
   re-sync; redaction before indexing; denylist untouched; blob-before-event;
   `token_estimate` on every event (addition #3).
-- Reads sources via a snapshot where the source is a live SQLite DB (OpenCode).
+- Reads sources via a snapshot where the source is a live SQLite DB (OpenCode, Hermes,
+  Devin, Antigravity CLI summaries). `connectors/sqlite_common.py` holds the WAL-safe
+  open: `mode=ro` first (sees uncheckpointed `-wal` rows); only if that fails with
+  CANTOPEN **and** no non-empty `-wal` exists, `immutable=1`; otherwise
+  `ConnectorError` (never silently drop WAL rows).
 
 ---
 
@@ -202,30 +206,163 @@ shape -> `ConnectorError` before writes.
 
 ---
 
-## 3. Antigravity (documented only — connector #2, after M1)
+## 2c. Hermes Agent (source name `hermes`)
 
-Read-only Phase 0 inspection; **not parsed or imported yet**.
+Code: `src/ctx/connectors/hermes.py`. Unofficial/observed schema (Hermes 2026-10,
+`schema_version` 32; shapes only, checked 2026-10-31 on a real install: 2 sessions,
+109 messages).
 
-| Path | What | Size |
-|---|---|---|
-| `~/.gemini/antigravity-cli/conversations/*.db` | 39 SQLite DBs, content in protobuf BLOBs (`steps.step_payload`, `metadata`, `render_info`) | 166 MB |
-| `~/.gemini/antigravity-cli/conversations/*.pb` | 3 protobuf dumps | ≤ 10 MB each |
-| `~/.gemini/antigravity-cli/conversation_summaries.db` | plain-text metadata: `title, preview, step_count, last_modified_time, workspace_uris, project_id, agent_name, status` | 128 KB |
-| `~/.gemini/antigravity-cli/brain/<uuid>/` | 1,504 plain files: markdown reports, PNGs, `*.metadata.json` | 140 MB |
-| `~/.gemini/antigravity-cli/history.jsonl` | session history index (pattern-matched as possibly secret-bearing; contents not yet inspected) | 228 KB |
-| `~/.gemini/config/projects/*.json` | project name = absolute path | small |
+| Path | What |
+|---|---|
+| `$HERMES_HOME/state.db` (default `~/.hermes`, Windows `%LOCALAPPDATA%\hermes`) | SQLite session store (**read**) |
+| `$HERMES_HOME/profiles/<name>/state.db` | one DB per profile (**read**; no profiles exist on the dev machine, covered by tests only) |
+| `.env`, `auth.json`, `auth.lock`, `config.yaml`, `.hermes_history`, `gateway_state.json`, `pairing/*`, `platforms/*`, `kanban.db*`, `projects.db*` | **denylisted** |
 
-Plan when built: `conversation_summaries.db` as the index (titles, workspaces,
-timestamps → sessions), `brain/` markdown artifacts as file-kind events, then
-reverse-engineer `steps.step_payload` protobuf (biggest effort, best evidence).
+Precedence for the root: `CTX_SOURCE_ROOT_HERMES`, then `HERMES_HOME`, then the per-OS
+default. Default source path is the root directory: the default DB plus every profile
+DB are read. A single `state.db` file may also be passed.
 
-**Denylist (explicit, to be enforced in code when this connector is built):**
+DB: about 40 tables (WAL; the file had no `-wal`/`-shm` on disk, which makes plain
+`mode=ro` fail with CANTOPEN, hence the fallback above). **Queried:** `sessions`,
+`messages`, `schema_version`. **Denylisted (never queried):** all FTS shadow tables
+(`messages_fts*`, `messages_fts_trigram*`), `state_meta`, `system_prompts`,
+`gateway_*`, `hosted_room*`, `delivery_obligations`, `async_delegations`,
+`session_admissions`, `session_model_usage`, `session_turn_leases`, `worker_*`, and
+credential-ish names. Unselected columns on queried tables (`user_id`, `origin_json`,
+`system_prompt`, billing fields, ...) are never read.
 
-- `mcp_config.json` (e.g. `~/.gemini/config/mcp_config.json`)
-- `plugins/**/mcp_config.json` (e.g. `~/.gemini/config/plugins/mem0/mcp_config.json`)
-- `history.jsonl` (`~/.gemini/antigravity-cli/history.jsonl` — pattern-matched as
-  possibly secret-bearing; contents not yet inspected)
-- `auth.json` (any credential file of that name under the source root)
+| Hermes | ctx |
+|---|---|
+| `sessions.id` | `source_session_id` (`<profile>/<id>` for non-default profiles) |
+| `started_at`, `ended_at` / `last_activity_at` / last message (REAL epoch seconds) | `started_at`, `ended_at` (ms) |
+| `cwd` | project linking (stored on 2/2 observed sessions; NULL -> unlinked) |
+| `model`, `title` (redacted) | `model`, `title`; `agent = "hermes"` |
+| `messages.timestamp` (REAL seconds) | `events.ts` (ms) |
+| message `role` user/assistant | `events.role`; `system` -> role NULL, synthetic; `_compressed_summary=1` -> synthetic |
+| `content` | kind `text` (empty skipped) |
+| `reasoning_content` / `reasoning` | kind `reasoning` |
+| `tool_calls` (OpenAI shape: `id`, `call_id`, `type`, `function{name, arguments(JSON string)}`) | one `tool:<name>` event each, `call_id`, text `input: <json>` |
+| role `tool`, `tool_call_id` (58/58 match a call id) | kind `tool_result`, `call_id`; if the call's input named `.env`/`*.pem`/`*.key` the output is file-redacted |
+
+`source_id = "<session ref>:<message_uid or id>:<block>"` (`block` = `text`,
+`reasoning`, `call<i>`, `result`). Profile namespacing is required: integer
+`messages.id` and session ids restart in every profile DB.
+**Version pin** `hermes-sqlite-v1:schema-<n>`: required tables/columns present and
+exactly one integer `schema_version` row, per DB; otherwise `ConnectorError`. Newer
+`schema_version` numbers are accepted when the structure still matches (Hermes bumps
+it often); structure, not the number, is the contract. Older per-session JSONL
+storage is not supported.
+
+## 2d. Devin CLI (source name `devin`)
+
+Code: `src/ctx/connectors/devin.py`. Unofficial/observed (shapes only, checked
+2026-10-31: 14 sessions, 3,579 `message_nodes` rows). Cloud Devin sessions are not
+stored locally and are out of scope. The `cli-federal` variant named in Devin docs
+has the same layout; point `CHISEL_SESSION_DB` or `CTX_SOURCE_ROOT_DEVIN` at it.
+
+| Path | What |
+|---|---|
+| `~/.local/share/devin/cli/sessions.db` (`$XDG_DATA_HOME/devin`; Windows `%APPDATA%\devin\cli`) | SQLite (WAL) (**read**) |
+| `cli/transcripts/<id>.json` (ATIF export, 13 of 14 sessions) | **not read**: the DB is the complete source |
+| `credentials.toml`, `mcp/**` (OAuth), `oauth*`, `auth*.json`, `*token*`, `.env*` | **denylisted** |
+
+Root precedence: `CTX_SOURCE_ROOT_DEVIN`, then `CHISEL_SESSION_DB` (a DB *file*; its
+directory becomes the only allowed path), then the per-OS default. The default allowed
+root is the whole `devin` directory so `credentials.toml` and `mcp/oauth` are
+explicitly inside the denylist's reach.
+
+Tables: **queried** `sessions(id, working_directory, model, agent_mode, created_at,
+last_activity_at, title, ...)`, `message_nodes(session_id, node_id, parent_node_id,
+chat_message JSON, created_at, metadata)`, `refinery_schema_history` (marker).
+**Denylisted:** `tool_call_state` (duplicates what nodes carry), `prompt_history`,
+`app_state`, `live_row_times`, `rendered_commits`, `subagent_heads`, `message_search*`.
+Timestamps are INTEGER seconds; `chat_message.metadata.created_at` is ISO and
+preferred.
+
+`chat_message` keys: `message_id`, `role` (user/assistant/tool/system), `content`
+(str), optional `thinking`, `tool_calls[{id, name, arguments, kind, index}]`,
+`tool_call_id` (1158/1158 match a call id), `images`.
+
+| Devin | ctx |
+|---|---|
+| `sessions.id` (a slug such as `word-word`) | `source_session_id`; `working_directory` -> project linking; `agent_mode` -> `agent` |
+| `content` / `thinking` | kinds `text` / `reasoning`; system -> role NULL, synthetic |
+| `tool_calls[]` | `tool:<name>`, `call_id = id`, text `input: <json>` |
+| role `tool` | kind `tool_result` (role NULL), `call_id`; sensitive-file calls file-redact the output |
+| `images` | kind `file`, text `[image]` (bytes dropped) |
+
+**Quirk: node copies.** `message_nodes` is re-inserted on compaction/branching: 3,579
+rows carry only 1,283 distinct `(session, message_id)`, and 95 of those groups differ
+in content between copies. The first node (lowest `node_id`) wins and later copies are
+counted as `duplicate_node` (events are immutable, rule 1). `source_id =
+"<session>:<message_id>:<block>"`. Unparsable rows are counted; an unknown `role` is
+skipped and counted.
+**Version pin** `devin-sqlite-v1:refinery-<n>`: required tables/columns, and the first
+200 nodes must include parsable JSON objects with `message_id` and `role`.
+
+---
+
+## 3. Antigravity CLI (`agy`, source name `antigravity_cli`)
+
+Code: `src/ctx/connectors/antigravity_cli.py`. **Not the Antigravity IDE.** Earlier
+revisions of this section described both under one heading; they are different
+storage trees: the CLI is `~/.gemini/antigravity-cli/` (this connector), the IDE is
+`~/.gemini/antigravity/` (section 3a, documented only). Unofficial/observed, checked
+2026-10-31 (shapes only).
+
+| Path (under `~/.gemini/antigravity-cli/`) | What |
+|---|---|
+| `brain/<conversation-id>/.system_generated/logs/transcript_full.jsonl` | **read**: one step per line (44 files, 4,247 lines). `transcript.jsonl` is a truncated copy and is not read |
+| `conversation_summaries.db` | **read** (snapshot): `conversation_summaries(conversation_id, title, workspace_uris JSON list of file:// URIs, agent_name, ...)`; 52 rows. `preview`, `raw_summary` are never selected |
+| `cache/last_conversations.json` | **read**: `{workspace path: latest conversation id}`; project-link fallback |
+| `conversations/*.db`, `*.pb` | **never opened**: protobuf blobs (`steps.step_payload`, `gen_metadata`, ...), no public schema. 5 of 49 conversations exist only here |
+| `history.jsonl`, `settings.json`, `config.json`, `mcp_config.json`, `plugins/**/mcp_config.json`, `auth.json`, `oauth*`, `credentials*`, `installation_id`, `user_settings.pb`, `jetski_state.pbtxt`, `cli.log`, `log/*`, `crashes/*`, `plugin_data/*` | **denylisted** (`history.jsonl` is flagged as possibly secret-bearing and was not inspected) |
+| `cache/conversation_metadata.json`, `knowledge/`, `annotations/`, markdown/PNG artifacts under `brain/` | not read (stale/duplicate; artifact import is future work) |
+
+Root: `CTX_SOURCE_ROOT_ANTIGRAVITY_CLI`, else `~/.gemini/antigravity-cli`
+(`%USERPROFILE%` on Windows). `AGY_CONVERSATIONS_DIR` relocates the `conversations/`
+directory; it is only *listed* (file names) to count protobuf-only conversations, and
+is added to `allowed_paths` when it lives elsewhere. The source path is the root
+directory.
+
+Step shape: `{step_index, type, source, status, created_at (ISO, seconds), content?,
+thinking?, tool_calls?[{name, args}], input_tokens?, ...}`. Observed `source` values
+`MODEL`, `USER_EXPLICIT`, `SYSTEM`; `status` `DONE`, `RUNNING`, `ERROR`, `INVALID`;
+types `PLANNER_RESPONSE`, `USER_INPUT`, `RUN_COMMAND`, `VIEW_FILE`, `CODE_ACTION`,
+`LIST_DIRECTORY`, `GREP_SEARCH`, `SEARCH_WEB`, `GENERIC`, `SYSTEM_MESSAGE`,
+`CHECKPOINT`, `CONVERSATION_HISTORY` (no content), `ERROR_MESSAGE`, ...
+
+| agy | ctx |
+|---|---|
+| `USER_INPUT` | kind `text`, role user |
+| `PLANNER_RESPONSE` `thinking` / `content` | kinds `reasoning` / `text`, role assistant |
+| `PLANNER_RESPONSE.tool_calls[]` | `tool:<name>`, text `input: <json>`; **no ids exist**, so `call_id = "<conversation>:<step>:call<i>"` |
+| other `MODEL` steps (`VIEW_FILE`, `RUN_COMMAND`, ...) | kind `tool_result` (role NULL). Paired FIFO with the preceding planner calls (observed: always exactly one call per result step), taking its `call_id`; a `.env`/`*.pem` path in the paired call's args file-redacts the output |
+| `SYSTEM` steps | role NULL, synthetic |
+| `USER_EXPLICIT` non-input steps (user-run command) | `tool_result`, no call id |
+| summaries `title` (redacted), `agent_name` | session `title`, `agent` (default `antigravity`) |
+| summaries `workspace_uris[0]`, else `last_conversations.json` | `sessions.cwd` (project linking); neither -> unlinked |
+
+`source_id = "<conversation>:<step_index>:<block>"`. A `RUNNING` step that is the
+**last line** of a transcript is skipped (live; imported complete on a later sync);
+the 90 observed `RUNNING` steps were all mid-file (stale), so those are imported.
+Unknown `source` values and malformed lines are counted, never fatal.
+**Version pin** `antigravity-cli-transcript-v1`: the head (200 lines) of every
+transcript must be JSON objects with int `step_index`, `type`, `source`, parsable
+`created_at`; `conversation_summaries` must keep its four columns. Protobuf-only
+conversations are a **warning** (and dry-run counter `protobuf_only_conversation`),
+not an error. Reverse-engineering `step_payload` is deferred and unverified.
+`denylist_tables` lists the protobuf DB tables (never opened).
+
+## 3a. Antigravity IDE (documented only, out of scope for now)
+
+`~/.gemini/antigravity/` (top level: `brain/`, `code_tracker/`, `context_state/`,
+`conversations/`, `implicit/`, `playground/`, `user_settings.pb`, `mcp_config.json`,
+`browserAllowlist.txt`, `installation_id`). Same family of protobuf conversation
+stores; **not parsed or imported**. When built it needs its own connector module and
+the same denylist treatment (`mcp_config.json`, `plugins/**/mcp_config.json`,
+`user_settings.pb`, `auth.json`). `~/.gemini/config/projects/*.json` (project name =
+absolute path) is shared config and also unread.
 
 ## 4. VS Code (stub, later)
 

@@ -55,6 +55,23 @@ Later in this family: Hermes, Gemini CLI.
 - [ ] Codex verified against real rollout files (none on the dev machine yet).
 - [ ] Size/mtime skip-cache for incremental sync (needs an engine state seam).
 
+## M1.6 — Hermes, Devin CLI, Antigravity CLI connectors
+
+- [x] `hermes` connector: `$HERMES_HOME/state.db` + `profiles/*/state.db` (profile-
+      namespaced ids), WAL-safe snapshot, FTS/gateway/room tables denylisted.
+- [x] `devin` connector: `cli/sessions.db` (`CHISEL_SESSION_DB` honored), compaction
+      node copies deduped, `credentials.toml`/`mcp/oauth` denylisted.
+- [x] `antigravity_cli` connector: `brain/*/transcript_full.jsonl` + summaries DB +
+      `last_conversations.json` project linking (`AGY_CONVERSATIONS_DIR` honored);
+      protobuf-only conversations counted as a warning.
+- [x] All three pass the shared contract suite, fail loud on unknown shape, are
+      idempotent, redact before index; `ctx sync --source <name> [--dry-run]` tested.
+- [ ] Hermes `profiles/*` verified on a real install (none on the dev machine).
+- [ ] Antigravity protobuf `steps` / `conversations/*.pb` decoding (5 of 49 real
+      conversations have no transcript); Antigravity IDE connector (separate source).
+- [ ] An uninstalled source makes plain `ctx sync` report an error for it; decide
+      whether absent storage should be `skipped` instead.
+
 ## M2 — Timeline & episodes (deterministic, no LLM)
 
 - [ ] Episodes computed deterministically (same project + < 45 min idle gap,
@@ -92,10 +109,11 @@ Later in this family: Hermes, Gemini CLI.
 - [x] `mcp_exclude` per-project opt-out; `ctx mcp config --client ...` prints (never
       writes) client config. Only the Claude Code snippet is verified.
 
-## M7 — Antigravity connector
+## M7 — Antigravity connector (CLI done in M1.6)
 
-- [ ] Connector #2 on the same contract (summaries DB + brain artifacts first,
-      protobuf `steps` later); passes the shared contract suite.
+- [x] Antigravity CLI transcript connector (see M1.6).
+- [ ] Antigravity IDE connector, `brain/` markdown artifacts as file events, and
+      protobuf `steps` decoding.
 
 ## M8 — VS Code + shell history connectors
 

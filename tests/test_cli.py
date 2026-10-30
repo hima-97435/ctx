@@ -23,6 +23,11 @@ def cli_env(tmp_path, monkeypatch):
     return home
 
 
+# Sources whose storage the cli_env fixture provides (the other connectors report an
+# error for storage that is not installed, which is correct but not what these tests check).
+PRESENT = ("--source", "opencode", "--source", "claude_code", "--source", "codex")
+
+
 def invoke(*args):
     return runner.invoke(app, list(args))
 
@@ -44,7 +49,7 @@ def test_sources_list_and_show(cli_env):
 
 
 def test_sync_then_resync_then_sources_list_shows_last_sync(cli_env):
-    first = invoke("sync")
+    first = invoke("sync", *PRESENT)
     assert first.exit_code == 0, first.output
     assert "events 9 (added 9, 0 already present)" in first.output
     second = invoke("sync", "--source", "opencode")
@@ -55,7 +60,7 @@ def test_sync_then_resync_then_sources_list_shows_last_sync(cli_env):
 
 
 def test_sync_dry_run_writes_nothing(cli_env):
-    r = invoke("sync", "--dry-run")
+    r = invoke("sync", "--dry-run", *PRESENT)
     assert r.exit_code == 0 and "[dry-run]" in r.output and "would add 9" in r.output
     assert not (cli_env / "ctx.db").exists()
     assert not (cli_env / "blobs").exists()
