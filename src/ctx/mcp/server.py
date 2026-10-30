@@ -28,6 +28,9 @@ from ctx.core.episodes import (
     render_timeline,
     resolve_tz,
 )
+from ctx.core.handoff import TARGETS as HANDOFF_TARGETS
+from ctx.core.handoff import collect as collect_handoff
+from ctx.core.handoff import render_handoff
 from ctx.core.projects import load_projects_config
 from ctx.core.redact import redact
 from ctx.core.retrieve import retrieve
@@ -257,6 +260,28 @@ def tool_timeline(
     return render_timeline(entries, zone)
 
 
+def tool_handoff(
+    conn: sqlite3.Connection,
+    project: str | None = None,
+    since: str | None = None,
+    to: str = "generic",
+    budget_tokens: int = 4000,
+) -> str:
+    """Deterministic (extractive, no LLM) handoff brief over visible projects only."""
+    if to not in HANDOFF_TARGETS:
+        raise ValueError(f"unknown target {to!r}; use one of: {', '.join(HANDOFF_TARGETS)}")
+    if budget_tokens < 1:
+        raise ValueError("budget_tokens must be >= 1")
+    package = collect_handoff(
+        conn,
+        _visible_project(conn, project),
+        parse_when(since) if since else None,
+        min(budget_tokens, MAX_RESPONSE_TOKENS),
+        exclude_mcp=True,
+    )
+    return render_handoff(conn, package, to)
+
+
 def tool_sync(conn: sqlite3.Connection, source: str | None = None) -> str:
     _check_source(source)
     results = run_sync(
@@ -345,6 +370,18 @@ def build_server() -> MCPServer:
         session titles, message counts, top files and commands. day is today, yesterday
         or YYYY-MM-DD; since/until accept 7d or dates; tz is an IANA zone."""
         return _wrap(tool_timeline)(project, source, since, until, day, tz, limit)
+
+    @server.tool()
+    def handoff(
+        project: str | None = None,
+        since: str | None = None,
+        to: str = "generic",
+        budget_tokens: int = 4000,
+    ) -> str:
+        """Markdown handoff brief of recent work (state, decisions, open threads, recent
+        files/commands, citations). Extractive, no LLM. to is claude-code, codex or
+        generic; since accepts 7d, 12h, 2026-10-01 or an ISO datetime."""
+        return _wrap(tool_handoff)(project, since, to, budget_tokens)
 
     @server.tool()
     def sync(source: str | None = None) -> str:

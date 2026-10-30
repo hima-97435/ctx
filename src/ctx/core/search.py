@@ -208,3 +208,44 @@ def search(
     )
     params.append(max(limit, 0))
     return [_make_hit(r, r["snip"], r["rank"], include_text) for r in conn.execute(sql, params)]
+
+
+def recent(
+    conn: sqlite3.Connection,
+    *,
+    project: str | None = None,
+    since: int | None = None,
+    until: int | None = None,
+    event_ids: list[int] | None = None,
+    include_all: bool = False,
+    exclude_mcp: bool = False,
+    limit: int = 200,
+    include_text: bool = True,
+) -> list[SearchHit]:
+    """Newest-first events under the same filters as `search` (no query, no ranking).
+
+    Used by `build_context` when there is nothing to match (handoff, summaries). With
+    `event_ids` only those events are considered (visibility still applies)."""
+    where, params = build_filters(
+        conn,
+        project=project,
+        since=since,
+        until=until,
+        include_all=include_all,
+        exclude_mcp=exclude_mcp,
+    )
+    if event_ids is not None:
+        if not event_ids:
+            return []
+        where.append(f"e.id IN ({','.join('?' * len(event_ids))})")
+        params.extend(event_ids)
+    sql = (
+        f"SELECT {_HIT_COLUMNS} FROM events e LEFT JOIN sessions s ON s.id = e.session_id"
+        f" {'WHERE ' + ' AND '.join(where) if where else ''}"
+        " ORDER BY e.ts DESC, e.id DESC LIMIT ?"
+    )
+    params.append(max(limit, 0))
+    return [
+        _make_hit(r, " ".join(r["full_text"].split())[:240], -float(r["ts"]), include_text)
+        for r in conn.execute(sql, params)
+    ]

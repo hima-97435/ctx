@@ -102,8 +102,10 @@ Later in this family: Hermes, Gemini CLI.
 
 ## M3 — Handoff
 
-- [ ] `ctx handoff <project>` emits a concise Markdown context package (state,
-      open TODOs, recent decisions) built **only** via `build_context`.
+- [x] `ctx handoff [--project --since --to claude-code|codex|generic] [--llm]` emits a
+      Markdown brief (state, decisions, open threads, recent files/commands, citations)
+      built **only** via `build_context`; deterministic and offline by default, `--llm`
+      optional and gated; MCP tool `handoff` (deterministic only). ADR-029.
 
 ## M4 — Eval set
 
@@ -134,12 +136,16 @@ Later in this family: Hermes, Gemini CLI.
 
 ## M5 — Synthesis with evidence links
 
-- [ ] LLM provider abstraction: `LocalProvider` (Ollama) + `OpenAICompatibleProvider`
-      (NVIDIA; base URL/key from `.env`, never committed).
-- [ ] Episode summaries + fact extraction, every fact carrying `evidence_event_ids`
-      and `status ∈ {suggested, confirmed, abandoned}`.
-- [ ] Cloud calls only for projects with `local_only=0` (all start `local_only=1`).
-- [ ] Derived tables provably rebuildable from `events` alone.
+- [x] LLM provider abstraction: `LocalProvider` (Ollama), `OpenAICompatibleProvider`
+      (NVIDIA NIM, generic), `GeminiProvider`; keys from env vars only (never `.env`
+      files, never stored). Cloud Gemini/NVIDIA embedders. `ctx ask` with citation check.
+- [x] Episode/day summaries with evidence links (`ctx summarize`, tables `summaries` /
+      `summary_events`, model + prompt version recorded).
+- [ ] Fact extraction, every fact carrying `evidence_event_ids` and
+      `status ∈ {suggested, confirmed, abandoned}`.
+- [x] Cloud calls only for projects with `local_only=0` (all start `local_only=1`),
+      enforced at one choke point; `ctx project set NAME --allow-cloud|--local-only`.
+- [x] Summaries are derived and regenerable; they hold links to immutable events only.
 
 ## M6 — MCP server (before Antigravity)
 

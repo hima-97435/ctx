@@ -78,6 +78,7 @@ def test_lists_all_tools():
         "recent_sessions",
         "sync",
         "timeline",
+        "handoff",
     }
 
 

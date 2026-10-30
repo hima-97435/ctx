@@ -4,10 +4,11 @@ Everything here is derived from `events` alone and rebuildable (`ctx embed --reb
 never writes to `events` (AGENTS rule 1). Text is redacted *before* it is chunked or
 embedded (rule 4), so a vector never encodes a secret that redaction would have removed.
 
-Embedders are pluggable. Only a local one ships (model2vec, optional extra `embed`). The
+Embedders are pluggable. A local one ships (model2vec, optional extra `embed`). The
 interface carries `is_cloud` so the local-only rule (rule 9) is enforced in code: a cloud
 embedder may never see text from, or a query scoped to, a `local_only=1` project (or an
-unlinked event, which has no project to opt in). No cloud embedder exists yet.
+unlinked event, unless the `unlinked` pseudo-project opted in). Cloud embedders (Gemini,
+NVIDIA) live in `ctx.llm.embedders` and share the chat policy predicate (ADR-029).
 """
 
 import hashlib
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ctx.core.redact import redact
+from ctx.llm.policy import UNLINKED_PROJECT_ID, cloud_scope_refusal
 
 CHUNK_CHARS = 1000  # ~250 tokens: small enough for static/small models, big enough for context
 MAX_CHUNKS_PER_EVENT = 16  # head only; FTS still covers the rest of very large tool outputs
@@ -107,6 +109,8 @@ def default_spec() -> str:
 
 def get_embedder(spec: str | None = None) -> Embedder:
     spec = spec or default_spec()
+    import ctx.llm.embedders  # noqa: F401  (registers the cloud kinds; imported lazily: cycle)
+
     kind, _, arg = spec.partition(":")
     factory = _FACTORIES.get(kind)
     if factory is None:
@@ -175,11 +179,9 @@ def check_embedder_allowed(
         raise LocalOnlyViolation(
             f"cloud embedder {embedder.name!r} needs a project scope with local_only=0"
         )
-    row = conn.execute("SELECT local_only FROM projects WHERE id = ?", (project_id,)).fetchone()
-    if row is None or row["local_only"]:
-        raise LocalOnlyViolation(
-            f"project {project_id!r} is local_only; cloud embedder {embedder.name!r} refused"
-        )
+    why = cloud_scope_refusal(conn, [project_id])
+    if why is not None:
+        raise LocalOnlyViolation(f"cloud embedder {embedder.name!r} refused: {why}")
 
 
 # --- building the derived table --------------------------------------------------------
@@ -220,16 +222,20 @@ def embed_events(
             conn.execute("ROLLBACK")
         raise
     cloud_filter = (
-        " AND COALESCE(s.project_id, e.project_id) IN (SELECT id FROM projects WHERE local_only=0)"
+        " AND (COALESCE(s.project_id, e.project_id) IN"
+        " (SELECT id FROM projects WHERE local_only=0 AND id != ?)"
+        " OR (COALESCE(s.project_id, e.project_id) IS NULL AND EXISTS"
+        " (SELECT 1 FROM projects WHERE id = ? AND local_only=0)))"
         if embedder.is_cloud
         else ""
     )
+    cloud_args = (UNLINKED_PROJECT_ID, UNLINKED_PROJECT_ID) if embedder.is_cloud else ()
     last = 0
     while True:
         rows = conn.execute(
             "SELECT e.id, e.text FROM events e LEFT JOIN sessions s ON s.id = e.session_id"
             f" WHERE e.id > ?{cloud_filter} ORDER BY e.id LIMIT ?",
-            (last, _BATCH_EVENTS),
+            (last, *cloud_args, _BATCH_EVENTS),
         ).fetchall()
         if not rows:
             break

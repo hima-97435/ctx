@@ -50,7 +50,8 @@ end — never collectors, never linkers.
    ranking path (FTS5, vector, or hybrid via Reciprocal Rank Fusion); `ctx search`,
    `build_context`, MCP `search`/`get_context` and `ctx eval` all call it, with filters
    and visibility applied identically in every mode. A cloud embedder may never be used
-   for a `local_only=1` project (checked in code; none exists yet).
+   for a `local_only=1` project (checked in code, `ctx.llm.policy`); Gemini and NVIDIA
+   embedders (`ctx/llm/embedders.py`) plug into the same interface (ADR-029).
 3. **Synthesized memory** — episodes (deterministic time-bucketed groupings) and
    facts (LLM-extracted, later). Every fact links to `evidence_event_ids` and carries
    status `suggested | confirmed | abandoned`. Dropped and rebuilt from raw events at
@@ -178,7 +179,36 @@ class Connector(Protocol):
   Known limitation: `.env`-style values under non-secret-looking keys in files
   *not* matching the sensitive names above are not recognized generically.
 - **local_only.** `LocalProvider` (Ollama) for `local_only=1` projects;
-  `OpenAICompatibleProvider` (NVIDIA) only for opted-in projects (ADR-003).
+  `OpenAICompatibleProvider` (NVIDIA, Gemini, generic) only for opted-in projects
+  (ADR-003, ADR-029). See "LLM providers and the policy gate".
+
+## LLM providers and the policy gate
+
+`src/ctx/llm/`: `http.py` (stdlib JSON POST, retries with backoff on 429/5xx/connection
+errors, timeouts, injectable transport so tests never touch the network), `providers.py`
+(`LocalProvider` for Ollama; `OpenAICompatibleProvider` with NVIDIA NIM / generic presets;
+`GeminiProvider` through Google's OpenAI-compatible endpoint), `embedders.py` (Gemini and
+NVIDIA embedders), `policy.py` (the gate), `grounded.py` (call + citation check),
+`synthesis.py` (stored summaries). Keys are read from env vars at call time and never
+stored, logged or put into an error message (response bodies are redacted and scrubbed of
+the key before they appear in one).
+
+**One choke point.** `Provider.chat()` requires a `Clearance`, minted only by
+`policy.authorize(conn, provider, project_ids)`. For a cloud provider (not loopback)
+`authorize` raises `CloudRefused` unless the scope is non-empty and every project in it has
+`local_only=0`; events with no project need the reserved `unlinked` pseudo-project to be
+`local_only=0`. The scope is the projects of the evidence items that will actually be sent.
+Cloud embedders use the same predicate in `embed_events` (skipped events) and `retrieve`.
+
+**One prompt path.** Prompts are built from a `ContextPackage` by
+`core.context.assemble_prompt` only. `build_context` with an empty query selects the newest
+events (chronological), optionally restricted to `event_ids`/`since` (handoff, summaries).
+Evidence ids are `[E<event id>]`; `grounded.ground` checks the model's citations against the
+package and flags hallucinated ones. The LLM never decides what belongs to a project,
+episode or summary (rule 7): summary inputs are chosen by episodes/days.
+
+`ctx handoff` (`core/handoff.py`) is deterministic and extractive; `--llm` rewrites the same
+package through the gate. Its MCP tool is deterministic only.
 
 ## MCP server
 

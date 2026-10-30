@@ -186,6 +186,38 @@ member event (all kinds). Migration `0005` made `project_id` nullable and added 
 The timeline's per-day split, counts, titles, top files and commands are computed at
 query time from events and are not stored.
 
+## Summaries (derived, regenerable)
+
+```sql
+CREATE TABLE summaries (
+  id INTEGER PRIMARY KEY,
+  scope TEXT NOT NULL CHECK (scope IN ('episode','day')),
+  scope_key TEXT NOT NULL,         -- episode: its start_ts (ms); day: local YYYY-MM-DD
+  project_id TEXT NOT NULL DEFAULT '',   -- '' = events linked to no project
+  start_ts INTEGER NOT NULL, end_ts INTEGER NOT NULL,
+  text TEXT NOT NULL,              -- redacted; inline [E<event id>] citations
+  provider TEXT NOT NULL, model TEXT NOT NULL, prompt_version TEXT NOT NULL,
+  input_hash TEXT NOT NULL,        -- sha256(prompt version, provider, model, event ids)
+  created_at TEXT NOT NULL,
+  UNIQUE (scope, scope_key, project_id)
+);
+CREATE TABLE summary_events (
+  summary_id INTEGER NOT NULL REFERENCES summaries(id) ON DELETE CASCADE,
+  event_id   INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  cited      INTEGER NOT NULL DEFAULT 0,   -- 1 = the model also cited it inline (valid id)
+  PRIMARY KEY (summary_id, event_id)
+);
+```
+
+Migration `0007`, written by `ctx summarize` (ADR-029). Links are deterministic: every event
+that reached the prompt is linked; the model only sets `cited`. A summary whose citations
+include an id outside the context, or none, is not stored. No FK to `episodes` because
+`ctx reindex` renumbers episodes (an episode summary is keyed by its `start_ts`). Not
+touched by `ctx reindex`; dropping both tables loses no source data (re-run `ctx summarize`).
+A cloud-provider summary exists only for `local_only=0` projects. The special project id
+`unlinked` (row created by `ctx project set unlinked`) carries the cloud opt-in for events
+with no project.
+
 ## Embeddings (optional, derived)
 
 ```sql

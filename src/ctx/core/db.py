@@ -193,6 +193,37 @@ _MIGRATION_0006_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX embeddings_hash_idx ON embeddings(model, text_hash)",
 )
 
+# LLM summaries with evidence links: derived, regenerable (`ctx summarize`), safe to drop.
+# No FK to episodes: `ctx reindex` renumbers them, so an episode summary is keyed by
+# (project, start_ts) instead (ADR-029).
+_MIGRATION_0007_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE summaries (
+      id             INTEGER PRIMARY KEY,
+      scope          TEXT NOT NULL CHECK (scope IN ('episode','day')),
+      scope_key      TEXT NOT NULL,
+      project_id     TEXT NOT NULL DEFAULT '',
+      start_ts       INTEGER NOT NULL,
+      end_ts         INTEGER NOT NULL,
+      text           TEXT NOT NULL,
+      provider       TEXT NOT NULL,
+      model          TEXT NOT NULL,
+      prompt_version TEXT NOT NULL,
+      input_hash     TEXT NOT NULL,
+      created_at     TEXT NOT NULL,
+      UNIQUE (scope, scope_key, project_id)
+    )
+    """,
+    """
+    CREATE TABLE summary_events (
+      summary_id INTEGER NOT NULL REFERENCES summaries(id) ON DELETE CASCADE,
+      event_id   INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      cited      INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (summary_id, event_id)
+    )
+    """,
+)
+
 MIGRATIONS: list[tuple[str, tuple[str, ...]]] = [
     ("0001_initial", _MIGRATION_0001_STATEMENTS),
     ("0002_event_message_id", _MIGRATION_0002_STATEMENTS),
@@ -200,6 +231,7 @@ MIGRATIONS: list[tuple[str, tuple[str, ...]]] = [
     ("0004_sync_state", _MIGRATION_0004_STATEMENTS),
     ("0005_episodes_nullable_project", _MIGRATION_0005_STATEMENTS),
     ("0006_embeddings", _MIGRATION_0006_STATEMENTS),
+    ("0007_summaries", _MIGRATION_0007_STATEMENTS),
 ]
 
 

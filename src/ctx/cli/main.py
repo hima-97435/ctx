@@ -29,12 +29,22 @@ from ctx.core.episodes import (
     resolve_tz,
 )
 from ctx.core.evalset import EvalFileError, load_eval_set, run_eval
-from ctx.core.projects import list_projects, load_projects_config
+from ctx.core.handoff import DEFAULT_BUDGET as HANDOFF_BUDGET
+from ctx.core.handoff import TARGETS as HANDOFF_TARGETS
+from ctx.core.handoff import collect as collect_handoff
+from ctx.core.handoff import render_handoff
+from ctx.core.projects import list_projects, load_projects_config, set_cloud_policy
 from ctx.core.retrieve import NoEmbeddings, resolve_mode, retrieve
 from ctx.core.search import parse_when
 from ctx.core.status import collect_status, run_doctor
 from ctx.core.sync import SourceResult, dry_run, rebuild_fts
 from ctx.core.sync import sync as run_sync
+from ctx.llm.grounded import ask as run_ask
+from ctx.llm.grounded import render_citations, run_grounded
+from ctx.llm.http import LLMError
+from ctx.llm.policy import CloudRefused
+from ctx.llm.providers import PROVIDER_NAMES, Provider, get_provider
+from ctx.llm.synthesis import SummaryResult, summarize_day, summarize_episode
 
 app = typer.Typer(help="ctx: local-first personal context engine.", no_args_is_help=True)
 sources_app = typer.Typer(help="Registered sources and their permission records.")
@@ -526,6 +536,180 @@ def project_show(
     typer.echo(f"last:         {_fmt_local(info['last_ts'], zone)}")
     per_source = ", ".join(f"{k}={v}" for k, v in info["events_by_source"].items())
     typer.echo(f"by source:    {per_source or '-'}")
+
+
+@project_app.command("set")
+def project_set(
+    name: str = typer.Argument(..., help="Project id or name, or `unlinked` (web-chat data)."),
+    allow_cloud: bool = typer.Option(False, "--allow-cloud", help="local_only=0: cloud LLMs ok."),
+    local_only: bool = typer.Option(False, "--local-only", help="local_only=1: never cloud."),
+) -> None:
+    """Opt a project in/out of cloud LLM calls (writes only ctx's own database)."""
+    if allow_cloud == local_only:
+        raise _fail("give exactly one of --allow-cloud or --local-only")
+    conn = _open_db_or_fail()
+    try:
+        pid = set_cloud_policy(conn, name, allow_cloud=allow_cloud)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"{pid}: local_only={0 if allow_cloud else 1}")
+    cfg = paths.config_path()
+    if cfg and any(p.id == pid for p in load_projects_config(cfg)):
+        typer.echo(
+            f"note: {pid} is defined in {cfg}; `ctx sync` re-applies that file, so set "
+            f"local_only there too to make this permanent",
+            err=True,
+        )
+
+
+def _provider_or_fail(name: str | None, model: str | None) -> Provider:
+    try:
+        return get_provider(name, model)
+    except ValueError as exc:
+        raise _fail(f"{exc} (known: {', '.join(PROVIDER_NAMES)})") from exc
+
+
+_LLM_ERRORS = (CloudRefused, LLMError, ValueError, sqlite3.OperationalError)
+
+
+@app.command("ask")
+def ask_cmd(
+    question: str,
+    project: str = typer.Option(None, "--project", "-p"),
+    provider: str = typer.Option(None, "--provider", help="ollama|nvidia|gemini|openai."),
+    model: str = typer.Option(None, "--model"),
+    budget: int = typer.Option(3000, "--budget", "-b", min=1, help="Context token budget."),
+    all_projects: bool = typer.Option(False, "--all", help="Include non-allowed projects."),
+) -> None:
+    """Answer from your history only, with evidence citations (context via build_context).
+
+    Cloud providers are refused unless every project in the evidence is local_only=0.
+    Hallucinated citations are flagged and exit 1.
+    """
+    llm = _provider_or_fail(provider, model)
+    conn = _open_db_or_fail()
+    try:
+        package = build_context(conn, question, budget, project, include_all=all_projects)
+        g = run_ask(conn, llm, package, project=project)
+    except (*_LLM_ERRORS, EmbedderUnavailable, NoEmbeddings) as exc:
+        raise _fail(str(exc), 1) from exc
+    typer.echo(g.text)
+    if g.citations:
+        typer.echo("\nCitations:\n" + render_citations(g))
+    for w in g.warnings():
+        typer.echo(f"warning: {w}", err=True)
+    if not g.ok:
+        raise typer.Exit(1)
+
+
+@app.command("handoff")
+def handoff_cmd(
+    project: str = typer.Option(None, "--project", "-p"),
+    since: str = typer.Option(None, "--since", help="7d, 12h, 2026-10-01 or ISO datetime."),
+    to: str = typer.Option("generic", "--to", help="|".join(HANDOFF_TARGETS)),
+    budget: int = typer.Option(HANDOFF_BUDGET, "--budget", "-b", min=1),
+    llm: bool = typer.Option(False, "--llm", help="Let an LLM write the brief (gated)."),
+    provider: str = typer.Option(None, "--provider"),
+    model: str = typer.Option(None, "--model"),
+    all_projects: bool = typer.Option(False, "--all"),
+) -> None:
+    """Markdown handoff brief of recent work. Deterministic and offline unless --llm."""
+    conn = _open_db_or_fail()
+    try:
+        if to not in HANDOFF_TARGETS:
+            raise ValueError(f"unknown target {to!r}; use one of: {', '.join(HANDOFF_TARGETS)}")
+        package = collect_handoff(
+            conn,
+            project,
+            parse_when(since) if since else None,
+            budget,
+            include_all=all_projects,
+        )
+        if not llm:
+            typer.echo(render_handoff(conn, package, to), nl=False)
+            return
+        if not package.items:
+            typer.echo(render_handoff(conn, package, to), nl=False)
+            return
+        g = run_grounded(
+            conn,
+            _provider_or_fail(provider, model),
+            package,
+            f"Write a Markdown handoff brief for a coding agent ({to}) with sections State, "
+            "Decisions, Open threads, Recent files and commands.",
+            project=project,
+            max_tokens=2000,
+        )
+    except _LLM_ERRORS as exc:
+        raise _fail(str(exc), 1) from exc
+    typer.echo(g.text)
+    typer.echo("\n## Citations\n" + render_citations(g))
+    for w in g.warnings():
+        typer.echo(f"warning: {w}", err=True)
+    if not g.ok:
+        raise typer.Exit(1)
+
+
+@app.command("summarize")
+def summarize_cmd(
+    episode: int = typer.Option(None, "--episode", help="Episode id (see `ctx timeline`)."),
+    day: str = typer.Option(None, "--day", help="today, yesterday or YYYY-MM-DD (local)."),
+    project: str = typer.Option(None, "--project", "-p", help="With --day: only this project."),
+    provider: str = typer.Option(None, "--provider"),
+    model: str = typer.Option(None, "--model"),
+    budget: int = typer.Option(4000, "--budget", "-b", min=1),
+    tz: str = typer.Option(None, "--tz"),
+    force: bool = typer.Option(False, "--force", help="Regenerate even if inputs are unchanged."),
+    all_projects: bool = typer.Option(False, "--all"),
+) -> None:
+    """Store an evidence-linked LLM summary of one episode or one day (per project)."""
+    if (episode is None) == (day is None):
+        raise _fail("give exactly one of --episode or --day")
+    llm = _provider_or_fail(provider, model)
+    conn = _open_db_or_fail()
+    try:
+        if episode is not None:
+            results = [
+                summarize_episode(
+                    conn, llm, episode, budget=budget, include_all=all_projects, force=force
+                )
+            ]
+        else:
+            zone = resolve_tz(tz)
+            d = parse_day(day, zone)
+            lo, hi = local_day_bounds(d, zone)
+            results = summarize_day(
+                conn,
+                llm,
+                d.isoformat(),
+                lo,
+                hi,
+                project=project,
+                budget=budget,
+                include_all=all_projects,
+                force=force,
+            )
+    except _LLM_ERRORS as exc:
+        raise _fail(str(exc), 1) from exc
+    if not results:
+        typer.echo("no events in that window")
+    bad = False
+    for r in results:
+        bad |= _print_summary(r)
+    if bad:
+        raise typer.Exit(1)
+
+
+def _print_summary(r: SummaryResult) -> bool:
+    label = f"{r.scope} {r.scope_key} project={r.project_id or '-'}"
+    typer.echo(f"== {label}: {r.status}" + (f" ({r.detail})" if r.detail else ""))
+    if r.status in ("stored", "unchanged") and r.text:
+        typer.echo(r.text)
+        if r.grounded and r.grounded.citations:
+            typer.echo("Citations:\n" + render_citations(r.grounded))
+    for w in r.warnings:
+        typer.echo(f"warning: {w}", err=True)
+    return r.status == "rejected"
 
 
 @app.command("serve-mcp")

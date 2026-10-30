@@ -179,3 +179,28 @@ def list_projects(conn: sqlite3.Connection) -> list[dict]:
             }
         )
     return out
+
+
+def set_cloud_policy(conn: sqlite3.Connection, name: str, *, allow_cloud: bool) -> str:
+    """Flip `projects.local_only` in ctx's own DB (never touches files outside it).
+
+    `unlinked` is the reserved pseudo-project that governs events linked to no project
+    (web-chat imports); it is created on first use. Returns the project id. Note that
+    `sync_projects` re-applies `config/projects.toml` on every sync (config wins), so a
+    project defined there must be changed there too to persist.
+    """
+    from ctx.core.search import resolve_project
+    from ctx.llm.policy import UNLINKED_PROJECT_ID
+
+    if name == UNLINKED_PROJECT_ID:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        conn.execute(
+            "INSERT OR IGNORE INTO projects(id, name, local_only, allowed, created_at)"
+            " VALUES (?, ?, 1, 0, ?)",
+            (UNLINKED_PROJECT_ID, UNLINKED_PROJECT_ID, now),
+        )
+        pid = UNLINKED_PROJECT_ID
+    else:
+        pid = resolve_project(conn, name)
+    conn.execute("UPDATE projects SET local_only = ? WHERE id = ?", (0 if allow_cloud else 1, pid))
+    return pid

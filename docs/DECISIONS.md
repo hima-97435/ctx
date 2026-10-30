@@ -312,3 +312,32 @@ scores `retrieve`, so any change to retrieval (including what `build_context` an
 see) is measurable; scoring full budgeted packages is a later extension. The personal
 set lives under `CTX_HOME` and is never committed (rule 2); the committed set is
 synthetic.
+
+### 2026-10-31 · ADR-029 · Providers, the cloud policy gate, ask, handoff and summaries (M3/M5)
+(1) HTTP uses the standard library (`urllib`) behind an injectable transport, not httpx:
+no new dependency (httpx is only a transitive one via `mcp`), and tests inject fakes so no
+test touches a network. Retries: 3 with 1/2/4 s backoff on 429/5xx/connection errors,
+`Retry-After` honoured (capped 30 s). (2) Gemini goes through Google's OpenAI-compatible
+endpoint, so one client class serves NVIDIA NIM, Gemini and generic servers; a loopback
+base URL counts as local. (3) Keys come only from env vars (`CTX_NVIDIA_API_KEY` /
+`NVIDIA_API_KEY`, `GEMINI_API_KEY`, `CTX_OPENAI_API_KEY`/`OPENAI_API_KEY`) read at call
+time; ctx deliberately does not load `.env` (rule 2). Error text names variables only and
+scrubs the key from echoed bodies. (4) Rule 9 has one choke point: `chat()` demands a
+`Clearance` that only `policy.authorize` mints, computed over the projects of the evidence
+actually sent. Mixed scope with any local_only project refuses the whole call; the day
+summarizer instead skips local_only groups for cloud providers. Unlinked events (web-chat
+exports) are local_only unless the reserved pseudo-project `unlinked` is opted in; chosen
+over a per-source flag to keep the core source-agnostic. `ctx project set` writes only
+ctx's DB; `projects.toml` is re-applied on each sync (config wins), which fails safe
+toward local_only but means a config-defined project must be edited there to persist.
+Cloud embedders reuse the predicate; the query embedding still needs a single opted-in
+project scope. NIM/Gemini embedders send every text as a passage (no query/passage
+asymmetry in the `Embedder` interface). (5) `ctx ask`: evidence ids `[E<event id>]`; the
+model must cite; ids outside the package are flagged `hallucinated` and exit 1; no
+evidence means "INSUFFICIENT EVIDENCE" without calling a model. Prompts are built only in
+`context.assemble_prompt`; evidence is fenced as data. (6) `build_context` with an empty
+query selects newest events chronologically (optionally by `event_ids`/`since`) so handoff
+and summaries still go through it. Handoff decisions/open threads are keyword heuristics
+over text events (labelled "candidates"), not claims. (7) Summaries link every event in
+the prompt deterministically (`cited` marks inline citations); the model never chooses
+links (rule 7). Ungrounded summaries are not stored. Not tested against real providers.

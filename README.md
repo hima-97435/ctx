@@ -55,6 +55,10 @@ ctx reindex [--gap MIN]       # rebuild the FTS index and the episodes from even
 ctx timeline [--day today|yesterday|YYYY-MM-DD] [--project X --source S --since 7d --until DATE --tz Europe/Berlin --all --limit N --json]
 ctx project list [--json]     # projects: allowed / local_only / mcp_exclude, sessions, events, last activity
 ctx project show NAME [--json]
+ctx project set NAME --allow-cloud|--local-only   # per-project cloud LLM opt-in (ctx's own DB only)
+ctx ask "why did I pick backoff?" [--project X --provider ollama|nvidia|gemini|openai --model M --budget N]
+ctx handoff [--project X --since 7d --to claude-code|codex|generic --budget N] [--llm --provider P]
+ctx summarize --episode ID | --day today|YYYY-MM-DD [--project X --provider P --force]
 ```
 
 `--mode auto` (the default for `search`, `context` and MCP) is hybrid once embeddings exist
@@ -115,12 +119,40 @@ Data lives in a per-user dir (override with `CTX_HOME`); project roots come from
 
 CLI surface grows per milestone — see `docs/ROADMAP.md`.
 
+### LLM providers (optional; `ask`, `handoff --llm`, `summarize`)
+
+Nothing here is needed for search, `context`, `timeline` or the deterministic `handoff`.
+Keys come **only from environment variables** (export them in your shell; ctx never reads
+`.env` files, never stores a key in the database and never prints one).
+
+| Provider (`--provider`) | Setup | Default model |
+|---|---|---|
+| `ollama` (default, local) | `ollama serve` + `ollama pull llama3.2`; URL `CTX_OLLAMA_URL` (default `http://localhost:11434`) | `llama3.2` |
+| `gemini` | `export GEMINI_API_KEY=...` (Google's OpenAI-compatible endpoint) | `gemini-2.5-flash` |
+| `nvidia` | `export CTX_NVIDIA_API_KEY=...` (or `NVIDIA_API_KEY`); NIM at `integrate.api.nvidia.com/v1` | `meta/llama-3.1-70b-instruct` |
+| `openai` (generic) | `CTX_OPENAI_BASE_URL`, `CTX_OPENAI_API_KEY`/`OPENAI_API_KEY`; a loopback URL (LM Studio, vLLM) counts as local | `gpt-4o-mini` |
+
+`CTX_LLM_PROVIDER` / `CTX_LLM_MODEL` set defaults. Requests are retried with backoff on
+429/5xx and time out. **Cloud policy:** a cloud provider is refused unless *every* project
+whose events are in the request has `local_only=0` (`ctx project set NAME --allow-cloud`);
+one local_only project in a mixed scope refuses the whole call. Events linked to no project
+(web-chat exports) count as local_only; opt them in with `ctx project set unlinked
+--allow-cloud` (a reserved pseudo-project). A project defined in `projects.toml` is
+re-applied from that file on every `ctx sync`, so set `local_only = false` there to make
+it permanent. Cloud embeddings: `CTX_EMBED_MODEL=gemini:gemini-embedding-001` or
+`nvidia:nvidia/nv-embedqa-e5-v5`, then `ctx embed`; local_only/unlinked events are skipped.
+
+`ctx ask` answers only from the retrieved evidence and prints the cited evidence ids
+(`[E<event id>]`); a citation that is not in the supplied context is flagged as
+hallucinated and the command exits 1. `ctx handoff` is extractive and deterministic by
+default (no LLM), also available as the MCP tool `handoff`.
+
 ## Privacy
 
 - Everything stays on your machine. `data/` is gitignored and never committed.
 - Secrets (API keys, tokens, `.env` values, private keys) are redacted **before**
   anything is indexed or sent to a model.
-- Cloud LLM calls are per-project opt-in: every project starts `local_only=1`.
+- Cloud LLM calls (`ask`, `handoff --llm`, `summarize`, cloud embeddings) are per-project opt-in, enforced in code at one gate: every project starts `local_only=1`; API keys live only in env vars.
 - Connectors carry hard, in-code denylists (paths and tables they must never read).
 
 ## Current status
@@ -133,7 +165,9 @@ CLI surface grows per milestone — see `docs/ROADMAP.md`.
 | M1.6 — Hermes, Devin CLI, Antigravity CLI connectors | implemented (`ctx sync --source hermes\|devin\|antigravity_cli`); formats unofficial, checked on one real install; Antigravity protobuf conversations unreadable |
 | M1.7 — Web export connectors (ChatGPT, Claude.ai, Gemini Takeout) | implemented (`ctx import <chatgpt\|claude-ai\|gemini> PATH`); synthetic fixtures only, unverified on real exports |
 | M6 — MCP server (`ctx serve-mcp`) | implemented (pulled forward) |
-| M2+ — timeline, handoff, synthesis | planned |
+| M2 — episodes, timeline | implemented |
+| M3 — `ctx handoff` (deterministic, optional `--llm`) | implemented |
+| M5 — providers, `ask`, `summarize`, cloud embedders | implemented; fact extraction pending; tested with mocked HTTP only |
 
 See `docs/ROADMAP.md` for acceptance tests per milestone.
 

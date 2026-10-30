@@ -15,6 +15,8 @@ EXPECTED_TABLES = {
     "facts",
     "schema_migrations",
     "embeddings",
+    "summaries",
+    "summary_events",
 }
 
 
@@ -31,6 +33,7 @@ def test_migrate_creates_full_schema(tmp_path):
         "0004_sync_state",
         "0005_episodes_nullable_project",
         "0006_embeddings",
+        "0007_summaries",
     }
 
 
@@ -39,7 +42,7 @@ def test_migrate_is_idempotent(tmp_path):
     conn1 = connect(path)
     conn2 = connect(path)  # reopen same file: must not re-apply or fail
     count = conn2.execute("SELECT count(*) FROM schema_migrations").fetchone()[0]
-    assert count == 6
+    assert count == 7
     assert conn1 is not conn2
 
 
