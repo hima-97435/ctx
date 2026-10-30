@@ -94,10 +94,14 @@ def search(
     since: int | None = None,
     until: int | None = None,
     include_all: bool = False,
+    exclude_mcp: bool = False,
     limit: int = 20,
     include_text: bool = False,
 ) -> list[SearchHit]:
-    """Ranked (bm25) matches with snippets and citations. `since`/`until` are epoch ms."""
+    """Ranked (bm25) matches with snippets and citations. `since`/`until` are epoch ms.
+
+    `exclude_mcp=True` additionally drops projects with `mcp_exclude=1` (used by the MCP server).
+    """
     where = ["events_fts MATCH ?"]
     params: list[object] = [fts_query(query)]
     if project is not None:
@@ -106,6 +110,11 @@ def search(
     if not include_all:
         where.append(
             "COALESCE(s.project_id, e.project_id) IN (SELECT id FROM projects WHERE allowed = 1)"
+        )
+    if exclude_mcp:
+        where.append(
+            "COALESCE(s.project_id, e.project_id)"
+            " IN (SELECT id FROM projects WHERE mcp_exclude = 0)"
         )
     if source is not None:
         where.append("e.source = ?")

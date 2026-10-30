@@ -20,6 +20,8 @@ from ctx.core.sync import sync as run_sync
 app = typer.Typer(help="ctx: local-first personal context engine.", no_args_is_help=True)
 sources_app = typer.Typer(help="Registered sources and their permission records.")
 app.add_typer(sources_app, name="sources")
+mcp_app = typer.Typer(help="MCP server integration (prints config; never writes it).")
+app.add_typer(mcp_app, name="mcp")
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
@@ -176,6 +178,29 @@ def reindex() -> None:
     """Rebuild the FTS index from events alone."""
     conn = _open_db_or_fail()
     typer.echo(f"reindexed {rebuild_fts(conn)} events")
+
+
+@app.command("serve-mcp")
+def serve_mcp() -> None:
+    """Run the read-only MCP server on stdio (for coding agents)."""
+    from ctx.mcp.server import serve
+
+    serve()
+
+
+@mcp_app.command("config")
+def mcp_config(
+    client: str = typer.Option(
+        ..., "--client", "-c", help="claude-code|codex|opencode|cursor|gemini|hermes|generic"
+    ),
+) -> None:
+    """Print the config snippet/command for a client. Does not modify any file."""
+    from ctx.mcp.config import snippet
+
+    try:
+        typer.echo(snippet(client))
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
 
 
 def _open_db_or_fail() -> sqlite3.Connection:

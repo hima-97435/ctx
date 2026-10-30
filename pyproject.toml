@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12",
     "pydantic>=2.7",
+    "mcp>=2.3.0",
 ]
 
 [project.scripts]

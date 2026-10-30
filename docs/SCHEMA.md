@@ -25,6 +25,7 @@ CREATE TABLE projects (
   id         TEXT PRIMARY KEY,                  -- slug, e.g. 'sar-images'
   name       TEXT NOT NULL UNIQUE,
   local_only INTEGER NOT NULL DEFAULT 1,        -- 1 => never cloud LLM (ADR-003)
+  mcp_exclude INTEGER NOT NULL DEFAULT 0,       -- 1 => never returned via MCP (ADR-022; migration 0003)
   allowed    INTEGER NOT NULL DEFAULT 0,        -- 0 => inert until enabled (ADR-002)
   created_at TEXT NOT NULL
 );

@@ -85,8 +85,12 @@ Later in this family: Hermes, Gemini CLI.
 
 ## M6 — MCP server (before Antigravity)
 
-- [ ] `ctx serve-mcp` exposes search/timeline/context to other agents via MCP,
-      responses only through `build_context` (progressive disclosure allowed later).
+- [x] `ctx serve-mcp` (stdio, official `mcp` SDK) exposes `search`, `get_context`,
+      `get_session`, `list_projects`, `recent_sessions` and an optional `sync` tool.
+      Context only through `build_context`; all output re-redacted and size-capped.
+      Pulled forward ahead of M2 (ADR-022). `timeline` follows with M2.
+- [x] `mcp_exclude` per-project opt-out; `ctx mcp config --client ...` prints (never
+      writes) client config. Only the Claude Code snippet is verified.
 
 ## M7 — Antigravity connector
 

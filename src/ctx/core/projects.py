@@ -18,6 +18,7 @@ class ProjectConfig(BaseModel):
     name: str
     allowed: bool = False
     local_only: bool = True
+    mcp_exclude: bool = False
     roots: list[str] = Field(default_factory=list)
 
 
@@ -73,11 +74,19 @@ def sync_projects(conn: sqlite3.Connection, configs: list[ProjectConfig]) -> Non
     try:
         for cfg in configs:
             conn.execute(
-                "INSERT INTO projects(id, name, local_only, allowed, created_at)"
-                " VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO projects(id, name, local_only, allowed, mcp_exclude, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(id) DO UPDATE SET name=excluded.name,"
-                " local_only=excluded.local_only, allowed=excluded.allowed",
-                (cfg.id, cfg.name, int(cfg.local_only), int(cfg.allowed), now),
+                " local_only=excluded.local_only, allowed=excluded.allowed,"
+                " mcp_exclude=excluded.mcp_exclude",
+                (
+                    cfg.id,
+                    cfg.name,
+                    int(cfg.local_only),
+                    int(cfg.allowed),
+                    int(cfg.mcp_exclude),
+                    now,
+                ),
             )
             conn.execute("DELETE FROM project_roots WHERE project_id = ?", (cfg.id,))
             conn.executemany(

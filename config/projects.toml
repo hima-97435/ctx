@@ -9,6 +9,7 @@
 #   (ADR-002) and start allowed; the Home catch-all starts disallowed (ADR-016)
 #   and any project discovered later starts allowed = false.
 # - `local_only` (default true) forbids cloud LLM calls for that project (ADR-003).
+# - `mcp_exclude = true` hides the project from the MCP server entirely (ADR-022).
 
 [projects.sar-images]
 name = "SAR Images"

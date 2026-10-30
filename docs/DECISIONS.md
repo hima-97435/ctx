@@ -142,3 +142,17 @@ optional `zstandard` package, not a hard dependency; (5) `denylist_tables` is em
 (ADR-020) - a size/mtime cache needs an engine state seam and is deferred. Codex shape
 is from public documentation only (no local rollouts to check); documented as unverified.
 
+### 2026-10-31 · ADR-022 · MCP server: read-only facade, `mcp_exclude` opt-out
+`ctx serve-mcp` lets the user's chosen coding agents query ctx. Decisions: (1)
+`local_only` governs ctx's *own* LLM calls (ADR-003); MCP instead returns redacted
+data to an agent the user configured, so it is not gated by `local_only`. (2) The
+opt-out is a new per-project `mcp_exclude` (config -> `projects.mcp_exclude`,
+migration 0003); excluded projects are never returned and look unknown if named. (3)
+`allowed=0` projects, including Home (ADR-016), and unfiled events stay invisible; no
+tool argument can widen visibility (no `include_all`). (4) Only `build_context`
+assembles context (rule 8); all output is re-redacted (rule 4) and capped at 8k tokens.
+(5) `sync` is exposed because it is idempotent and writes only ctx's own data dir; it
+reads source storage read-only as `ctx sync` does. (6) `ctx mcp config` prints
+snippets and never writes client config (rule 10); only Claude Code's is verified.
+(7) Uses `mcp` 2.x `MCPServer` (renamed from v1 `FastMCP`). Roadmap: M6 pulled ahead of
+M2; timeline tool deferred.

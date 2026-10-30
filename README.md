@@ -41,6 +41,20 @@ ctx context "redaction pipeline" --project ctx --budget 2000   # budgeted, cited
 ctx reindex                   # rebuild the FTS index from events
 ```
 
+### MCP server (use ctx as memory from any coding agent)
+
+```
+ctx mcp config --client claude-code   # prints `claude mcp add ctx -- ctx serve-mcp`
+ctx mcp config --client codex         # also: opencode|cursor|gemini|hermes|generic
+```
+
+`ctx mcp config` only prints; it never edits your client's config. Snippets other than
+Claude Code are marked UNVERIFIED. `ctx serve-mcp` runs a read-only stdio server with
+tools `search`, `get_context`, `get_session`, `list_projects`, `recent_sessions`, and
+`sync` (imports into ctx's own database only). Results are redacted, cited, and capped
+at ~8k tokens. Hide a project from MCP with `mcp_exclude = true` in `projects.toml`;
+disallowed projects (e.g. Home) are never served. See ADR-022.
+
 Data lives in a per-user dir (override with `CTX_HOME`); project roots come from
 `config/projects.toml` (or `<data dir>/projects.toml`).
 
@@ -61,7 +75,8 @@ CLI surface grows per milestone — see `docs/ROADMAP.md`.
 | M0 — docs & scaffolding | done |
 | M1 — OpenCode import, search, `build_context` | implemented; prompt-history connector and `sources add` pending |
 | M1.5 — Claude Code + Codex connectors | implemented (`ctx sync --source claude_code\|codex`); Codex unverified on real files |
-| M2+ — timeline, handoff, synthesis, MCP | planned |
+| M6 — MCP server (`ctx serve-mcp`) | implemented (pulled forward) |
+| M2+ — timeline, handoff, synthesis | planned |
 
 See `docs/ROADMAP.md` for acceptance tests per milestone.
 

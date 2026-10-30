@@ -66,11 +66,18 @@ def build_context(
     project: str | None = None,
     *,
     include_all: bool = False,
+    exclude_mcp: bool = False,
     top_n: int = DEFAULT_TOP_N,
 ) -> ContextPackage:
     package = ContextPackage(query=query, project=project, budget_tokens=budget_tokens)
     hits = search(
-        conn, query, project=project, include_all=include_all, limit=top_n, include_text=True
+        conn,
+        query,
+        project=project,
+        include_all=include_all,
+        exclude_mcp=exclude_mcp,
+        limit=top_n,
+        include_text=True,
     )
     remaining = budget_tokens
     for hit in hits:

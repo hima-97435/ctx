@@ -155,6 +155,17 @@ class Connector(Protocol):
 - **local_only.** `LocalProvider` (Ollama) for `local_only=1` projects;
   `OpenAICompatibleProvider` (NVIDIA) only for opted-in projects (ADR-003).
 
+## MCP server
+
+`src/ctx/mcp/server.py` (`ctx serve-mcp`, stdio, `mcp` SDK `MCPServer`) is a thin,
+source-agnostic, read-only facade over `search`, `build_context` and plain session
+queries. Tools: `search`, `get_context`, `get_session`, `list_projects`,
+`recent_sessions`, and `sync` (runs the idempotent importer; writes only ctx's own
+DB/blobs). Visibility is fixed server-side: `allowed=1 AND mcp_exclude=0`; excluded
+projects look nonexistent and cannot be requested by argument. Every response is
+re-redacted and capped (`MAX_RESPONSE_TOKENS`, per-message cap in `get_session`).
+`ctx mcp config` only prints client snippets (`src/ctx/mcp/config.py`). See ADR-022.
+
 ## Context assembly seam (build now, intelligence later)
 
 Any feature that sends context to an LLM (`ask`, `handoff`, MCP) must go through
