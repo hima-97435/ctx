@@ -1,7 +1,7 @@
 import sqlite3
 
 from ctx.core.db import connect
-from ctx.core.paths import data_dir, db_path, repo_root
+from ctx.core.paths import data_dir, db_path, default_data_dir, repo_root
 
 EXPECTED_TABLES = {
     "sources",
@@ -23,7 +23,7 @@ def test_migrate_creates_full_schema(tmp_path):
     names = {r["name"] for r in rows}
     assert EXPECTED_TABLES <= names
     applied = {r["name"] for r in conn.execute("SELECT name FROM schema_migrations")}
-    assert applied == {"0001_initial"}
+    assert applied == {"0001_initial", "0002_event_message_id"}
 
 
 def test_migrate_is_idempotent(tmp_path):
@@ -31,7 +31,7 @@ def test_migrate_is_idempotent(tmp_path):
     conn1 = connect(path)
     conn2 = connect(path)  # reopen same file: must not re-apply or fail
     count = conn2.execute("SELECT count(*) FROM schema_migrations").fetchone()[0]
-    assert count == 1
+    assert count == 2
     assert conn1 is not conn2
 
 
@@ -94,8 +94,12 @@ def test_event_unique_source_source_id(tmp_path):
 
 
 def test_paths_defaults_and_env_override(monkeypatch, tmp_path):
+    monkeypatch.delenv("CTX_HOME", raising=False)
     monkeypatch.delenv("CTX_DATA_DIR", raising=False)
-    assert db_path() == repo_root() / "data" / "ctx.db"
-    assert data_dir() == repo_root() / "data"
+    assert data_dir() == default_data_dir()
+    assert repo_root() not in data_dir().parents  # repo-independent default
     monkeypatch.setenv("CTX_DATA_DIR", str(tmp_path))
-    assert db_path() == tmp_path / "ctx.db"
+    assert db_path() == tmp_path.resolve() / "ctx.db"
+    other = tmp_path / "home"
+    monkeypatch.setenv("CTX_HOME", str(other))  # CTX_HOME wins over the legacy var
+    assert db_path() == other.resolve() / "ctx.db"

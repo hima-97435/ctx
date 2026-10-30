@@ -65,6 +65,7 @@ Observed data: 47 sessions / 1,618 messages / 6,093 parts, 2026-04-24 → 2026-1
 | part content (below) | `events.text` (redacted, truncated) |
 | message `path.cwd` / session `directory` | project linking (longest root prefix) |
 | part `id` | `events.source_id` |
+| part `message_id` | `events.message_id` (citations) |
 | part `time_created` (ms) | `events.ts` |
 
 Part content extraction: `text`→`text`; `reasoning`→`text`; `tool`→ `state.output`

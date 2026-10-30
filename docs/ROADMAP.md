@@ -16,22 +16,25 @@ Done when all of these pass with tests:
 
 - [ ] `ctx sync` imports all existing OpenCode sessions (47 sessions / 1,618
       messages / 6,093 parts) into SQLite, linked to projects via cwd roots.
-- [ ] A second `ctx sync` creates **zero duplicates** (contract test).
-- [ ] `ctx search "phrase"` returns excerpts with session/message references and
+      *(Implemented and fixture-tested; the run against the real 47-session DB is
+      still to be done by the user: `ctx sync --dry-run`, then `ctx sync`.)*
+- [x] A second `ctx sync` creates **zero duplicates** (contract test).
+- [x] `ctx search "phrase"` returns excerpts with session/message references and
       respects `--project`, `--since`, `--source`, `--all`.
-- [ ] Redaction runs **before** indexing; unit test with fake secrets (API keys,
+- [x] Redaction runs **before** indexing; unit test with fake secrets (API keys,
       bearer tokens, `.env` values, private keys) proves none survive into
       `events`/FTS.
-- [ ] Tool outputs > 64 KB are truncated (head+tail) with a blob reference written
+- [x] Tool outputs > 64 KB are truncated (head+tail) with a blob reference written
       **before** the event insert; every event has `token_estimate`.
 - [ ] Prompt-history connector imports `prompt-history.jsonl` as `kind='prompt'` events.
+      *(Deferred: not yet implemented.)*
 - [ ] Source permission records work: `ctx sources list | add | show` (enabled,
       allowed paths, last sync, schema version seen); denylisted tables/paths are
-      never read (contract test).
-- [ ] OpenCode connector fails loudly on unrecognized schema/version, before any writes.
-- [ ] Shared connector contract suite exists and the OpenCode connectors pass it.
-- [ ] Fixture-based test uses a small anonymized sample of the real session format.
-- [ ] `build_context(query, budget_tokens, project)` exists with v1 behavior
+      never read (contract test). *(`list` and `show` done; `add` deferred.)*
+- [x] OpenCode connector fails loudly on unrecognized schema/version, before any writes.
+- [x] Shared connector contract suite exists and the OpenCode connectors pass it.
+- [x] Fixture-based test uses a small anonymized sample of the real session format.
+- [x] `build_context(query, budget_tokens, project)` exists with v1 behavior
       (top-N FTS5 trimmed to budget) and a unit test; returns evidence IDs and
       what was left out.
 

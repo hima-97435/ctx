@@ -31,11 +31,12 @@ class BlobStore:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, path)
-        dir_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+        if os.name != "nt":  # Windows cannot open/fsync a directory fd
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         return ref
 
     def resolve(self, ref: str) -> Path:

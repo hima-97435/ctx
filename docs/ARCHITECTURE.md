@@ -101,11 +101,20 @@ class Connector(Protocol):
   must pass, on a real-format fixture: (a) idempotent re-sync → zero duplicates;
   (b) redaction applied before indexing; (c) denylisted paths/tables never touched;
   (d) blob written before referencing event; (e) every event has `token_estimate`.
+- **Sync engine** (`src/ctx/core/sync.py`) is source-agnostic: it re-checks
+  `allowed_paths`/`denylist_paths` before dispatch, calls `check_version` before any
+  write, re-redacts every event, verifies referenced blobs exist, links projects by
+  longest cwd prefix, and inserts with `INSERT OR IGNORE` (events are never updated).
+  `ctx sync --dry-run` writes nothing. Connectors are registered in
+  `src/ctx/connectors/registry.py`.
+- The contract suite is a reusable class (`ConnectorContract`); a connector's test
+  module subclasses it and supplies fixtures (see `tests/test_opencode_contract.py`).
 - Details per source: `docs/CONNECTORS.md`.
 
 ## Privacy model
 
-- **Local-first.** DB, blobs, indexes stay in `./data/` (gitignored). Nothing
+- **Local-first.** DB, blobs, indexes stay in the per-user data dir (`CTX_HOME`
+  override; see ADR-019) or `./data/` in a dev checkout (gitignored). Nothing
   leaves the machine in M1; later, LLM calls leave only via the provider
   abstraction, only for projects with `local_only=0`.
 - **Per-project allow.** `projects.allowed` gates search/feature visibility. 11 of
@@ -152,11 +161,15 @@ Any feature that sends context to an LLM (`ask`, `handoff`, MCP) must go through
 **one** function — no other code path may assemble prompts:
 
 ```python
-build_context(query: str, budget_tokens: int, project: str | None = None) -> ContextPackage
+build_context(conn, query: str, budget_tokens: int, project: str | None = None, *,
+              include_all: bool = False, top_n: int = 50) -> ContextPackage
 ```
 
 `ContextPackage` carries: selected items (each with text, type,
-`evidence_event_ids`), total token count used, and what was left out.
+`evidence_event_ids`, citation), total token count used, and what was left out
+(`left_out`: event id, tokens, reason). Implemented in `src/ctx/core/context.py`;
+the best hit is trimmed head+tail to fit when nothing else would, and text is
+re-redacted before it is returned. `conn` is the DB handle the seam reads from.
 
 v1 behavior is deliberately dumb: top-N FTS5 hits trimmed to budget using
 `token_estimate`. Pruning, compaction, reranking, rolling summaries, and budget

@@ -99,3 +99,28 @@ on disk; one missed re-redaction leaks), or truncate-then-redact (the blob would
 hold the unredacted middle). Reason: ctx must never persist secrets anywhere;
 byte-exact fidelity is sacrificed only where redaction matched. The
 re-redaction-on-display invariant (ADR-012) remains as belt-and-braces.
+
+### 2026-10-31 · ADR-018 · `events.message_id` added for citations
+Search citations must name source session **and** message, but the original
+`events` table only had `session_id`. Migration `0002_event_message_id` adds a
+nullable `message_id` column and connectors set it via `RawEvent.message_ref`.
+Alternatives: parse it out of `raw_json` (always NULL in v1), a side table
+(extra join for every hit). Rows imported before the migration have NULL.
+
+### 2026-10-31 · ADR-019 · Data dir moves to a per-OS user dir; `CTX_HOME` override
+Default data dir is now `~/Library/Application Support/ctx` (macOS),
+`$XDG_DATA_HOME/ctx` (Linux), `%LOCALAPPDATA%\ctx` (Windows) instead of
+`<repo>/data`, so an installed `ctx` works from any directory and the repo
+checkout never holds personal data. `CTX_HOME` overrides (tests); `CTX_DATA_DIR`
+still works. Implemented by hand rather than adding `platformdirs`. Anyone with
+an existing `<repo>/data` sets `CTX_HOME=<repo>/data`.
+
+### 2026-10-31 · ADR-020 · Sync engine: events insert-only, sessions upserted, project via session
+`INSERT OR IGNORE` on `UNIQUE(source, source_id)`: a changed upstream record never
+rewrites an event (append-only, rule 1). Sessions are link metadata and are
+upserted, so editing `projects.toml` re-links them; search resolves a hit's project
+as `COALESCE(sessions.project_id, events.project_id)`, so re-linking needs no event
+rewrite. Search shows only `allowed=1` projects unless `--all`; events with no
+project are treated as not allowed (ADR-002/016). The engine re-redacts connector
+output as defense in depth. Every sync is a full pass over a fresh snapshot
+(incremental `time_updated` filtering is deferred; idempotency makes it safe).

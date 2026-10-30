@@ -156,7 +156,9 @@ def open_snapshot(
             dst.close()
     finally:
         src.close()
-    return sqlite3.connect(snapshot_path)
+    snap = sqlite3.connect(snapshot_path)
+    snap.row_factory = sqlite3.Row
+    return snap
 
 
 @dataclass(frozen=True)
@@ -293,7 +295,53 @@ def iter_events(conn: sqlite3.Connection, *, blob_store: BlobStore) -> Iterator[
             blob_ref=prepared.blob_ref,
             raw_json=None,
             content_hash=hashlib.sha256(data_str.encode("utf-8")).hexdigest(),
+            message_ref=row["message_id"],
         )
+
+
+SCHEMA_VERSION_PIN = "opencode-structural-v1"
+
+
+class OpenCodeConnector:
+    """Connector-protocol adapter over this module's functions (see base.Connector)."""
+
+    name = SOURCE
+    schema_version_pin = SCHEMA_VERSION_PIN
+    denylist_paths = DENYLIST_PATHS
+    denylist_tables = DENYLIST_TABLES
+
+    def __init__(self, source_root: Path | None = None) -> None:
+        self.source_root = Path(source_root) if source_root else SOURCE_ROOT
+        self.allowed_paths = [self.source_root]
+
+    def default_source_path(self) -> Path:
+        return self.source_root / "opencode.db"
+
+    def check_version(self, source_path: Path) -> str:
+        conn = open_readonly(
+            source_path, source_root=self.source_root, denylist_paths=self.denylist_paths
+        )
+        try:
+            return check_version(conn)
+        finally:
+            conn.close()
+
+    def fetch(
+        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+    ) -> Iterator[RawSession | RawEvent]:
+        self.check_version(source_path)  # fail loud before reading content or yielding
+        conn = open_snapshot(
+            source_path,
+            tmp_dir=tmp_dir,
+            source_root=self.source_root,
+            denylist_paths=self.denylist_paths,
+        )
+        try:
+            yield from iter_sessions(conn)
+            yield from iter_events(conn, blob_store=blob_store)
+        finally:
+            conn.close()
+            (Path(tmp_dir) / "opencode-snapshot.db").unlink(missing_ok=True)
 
 
 @dataclass

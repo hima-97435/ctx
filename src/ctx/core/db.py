@@ -128,8 +128,12 @@ _MIGRATION_0001_STATEMENTS: tuple[str, ...] = (
     """,
 )
 
+# Citations need the source message an event came from (ADR-018).
+_MIGRATION_0002_STATEMENTS: tuple[str, ...] = ("ALTER TABLE events ADD COLUMN message_id TEXT",)
+
 MIGRATIONS: list[tuple[str, tuple[str, ...]]] = [
     ("0001_initial", _MIGRATION_0001_STATEMENTS),
+    ("0002_event_message_id", _MIGRATION_0002_STATEMENTS),
 ]
 
 

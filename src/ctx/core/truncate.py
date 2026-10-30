@@ -47,3 +47,20 @@ def prepare_text(
         )
         kept = content[:head] + marker + content[-tail:]
     return PreparedText(kept, estimate_tokens(kept), True, blob_ref)
+
+
+def truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Pure head+tail truncation so the result's estimate fits `max_tokens`.
+
+    Used when assembling context (no blob spill: the full text stays in `events`).
+    Text that already fits is returned unchanged.
+    """
+    if estimate_tokens(text) <= max_tokens:
+        return text
+    marker = "\n[... truncated ...]\n"
+    keep = max(max_tokens * 4 - len(marker), 0)
+    if keep == 0:
+        return text[: max(max_tokens * 4, 0)]
+    head = keep - keep // 2
+    tail = keep // 2
+    return text[:head] + marker + (text[-tail:] if tail else "")

@@ -35,3 +35,4 @@ class RawEvent:
     blob_ref: str | None  # 'blobs/<aa>/<hash>' relative to the data dir
     raw_json: str | None  # reserved; v1 connectors leave it NULL (text/blob carry content)
     content_hash: str  # sha256 of the canonical source content
+    message_ref: str | None = None  # source message id, for citations (events.message_id)

@@ -89,6 +89,7 @@ CREATE TABLE events (
   role           TEXT,                         -- 'user' | 'assistant' | NULL
   kind           TEXT NOT NULL,                -- text | reasoning | tool:<name> | patch | file | compaction | prompt
   call_id        TEXT,                         -- links a tool result to its call
+  message_id     TEXT,                         -- source message id (migration 0002, ADR-018); citations
   synthetic      INTEGER NOT NULL DEFAULT 0,   -- system-injected content
   text           TEXT NOT NULL,                -- REDACTED; head+tail if truncated
   token_estimate INTEGER NOT NULL,
@@ -157,11 +158,16 @@ Both tables can be dropped and rebuilt from `events` alone.
 
 ## Data directory layout
 
+The data dir is `$CTX_HOME`, else `$CTX_DATA_DIR`, else a per-OS user dir (macOS
+`~/Library/Application Support/ctx`, Linux `$XDG_DATA_HOME/ctx` or
+`~/.local/share/ctx`, Windows `%LOCALAPPDATA%\ctx`). Project config is
+`$CTX_CONFIG`, else `<data dir>/projects.toml`, else the repo's `config/projects.toml`.
+
 ```
-data/
+<data dir>/
   ctx.db                      SQLite database (WAL)
   blobs/<aa>/<sha256>         spilled raw content, content-addressed
   tmp/                        sync snapshots (e.g. opencode snapshot copy)
 ```
 
-`data/` is gitignored. `AGENTS.md` forbids committing it.
+The repo-local `data/` is gitignored. `AGENTS.md` forbids committing it.

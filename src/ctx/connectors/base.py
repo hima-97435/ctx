@@ -6,7 +6,12 @@ sync engine (ADR-014). Every connector must pass tests/connector_contract.py.
 
 import fnmatch
 import re
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Protocol
+
+from ctx.core.blobs import BlobStore
+from ctx.core.model import RawEvent, RawSession
 
 
 class ConnectorError(Exception):
@@ -44,3 +49,26 @@ def assert_path_allowed(
     for pattern in denylist_patterns:
         if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(resolved.name, pattern):
             raise DenylistViolation(f"path {rel!r} matches denylist pattern {pattern!r}")
+
+
+class Connector(Protocol):
+    """What the source-agnostic sync engine requires of a connector (ADR-007).
+
+    `fetch` must run `check_version` first and raise ConnectorError before yielding
+    anything; it yields every RawSession before the RawEvents that reference it.
+    Events arrive already redacted, truncated and with any blob already fsynced.
+    """
+
+    name: str
+    schema_version_pin: str
+    allowed_paths: list[Path]
+    denylist_paths: tuple[str, ...]
+    denylist_tables: frozenset[str]
+
+    def default_source_path(self) -> Path: ...
+
+    def check_version(self, source_path: Path) -> str: ...
+
+    def fetch(
+        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+    ) -> Iterator[RawSession | RawEvent]: ...

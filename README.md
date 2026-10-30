@@ -30,13 +30,19 @@ brew install uv     # or: pip install uv
 uv sync             # creates .venv, installs deps, writes uv.lock
 ```
 
-## Quick start (lands with Milestone 1)
+## Quick start
 
 ```sh
 ctx sources list              # registered sources and their permissions
+ctx sync --dry-run            # report what would be imported; writes nothing
 ctx sync                      # import all enabled sources (idempotent)
-ctx search "redaction pipeline" --project ctx
+ctx search "redaction pipeline" --project ctx [--source S --since 7d --until DATE --all --limit N --json]
+ctx context "redaction pipeline" --project ctx --budget 2000   # budgeted, cited context
+ctx reindex                   # rebuild the FTS index from events
 ```
+
+Data lives in a per-user dir (override with `CTX_HOME`); project roots come from
+`config/projects.toml` (or `<data dir>/projects.toml`).
 
 CLI surface grows per milestone — see `docs/ROADMAP.md`.
 
@@ -53,7 +59,7 @@ CLI surface grows per milestone — see `docs/ROADMAP.md`.
 | Milestone | Status |
 |---|---|
 | M0 — docs & scaffolding | done |
-| M1 — OpenCode import, search, `build_context` | next |
+| M1 — OpenCode import, search, `build_context` | implemented; prompt-history connector and `sources add` pending |
 | M2+ — timeline, handoff, synthesis, MCP | planned |
 
 See `docs/ROADMAP.md` for acceptance tests per milestone.
