@@ -10,11 +10,12 @@ are upserted. The FTS index is maintained by triggers on `events` and is fully
 rebuildable via `rebuild_fts`. The engine has no source-specific branches.
 """
 
+import inspect
 import json
 import sqlite3
 import tempfile
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,8 +23,15 @@ from ctx.connectors.base import Connector, ConnectorError, assert_path_allowed
 from ctx.core import paths
 from ctx.core.blobs import BlobStore
 from ctx.core.model import RawEvent, RawSession
-from ctx.core.projects import ProjectConfig, link_project, load_roots, sync_projects
+from ctx.core.projects import (
+    ProjectConfig,
+    link_project,
+    load_roots,
+    relink_sessions,
+    sync_projects,
+)
 from ctx.core.redact import redact
+from ctx.core.sync_state import SyncState
 from ctx.core.tokens import estimate_tokens
 
 BATCH_SIZE = 500
@@ -32,7 +40,7 @@ BATCH_SIZE = 500
 @dataclass
 class SourceResult:
     source: str
-    status: str = "ok"  # ok | skipped | error
+    status: str = "ok"  # ok | skipped (disabled) | not_installed | error
     dry_run: bool = False
     schema_version: str | None = None
     sessions_seen: int = 0
@@ -41,7 +49,11 @@ class SourceResult:
     events_new: int = 0
     events_duplicate: int = 0
     blobs: int = 0
+    skipped_records: int = 0  # records the connector read but deliberately did not import
+    unchanged_units: int = 0  # files/databases skipped by incremental state
+    warnings: list[str] = field(default_factory=list)
     error: str | None = None
+    detail: str | None = None  # e.g. the path reported missing for not_installed
 
 
 def enforce_access(connector: Connector, source_path: Path) -> None:
@@ -85,8 +97,14 @@ def sync(
     source_paths: Mapping[str, Path] | None = None,
     project_configs: list[ProjectConfig] | None = None,
     data_dir: Path | None = None,
+    full: bool = False,
 ) -> list[SourceResult]:
-    """Run every enabled (or `only` selected) connector. Errors are per-source."""
+    """Run every enabled (or `only` selected) connector. Errors are per-source.
+
+    A source whose storage does not exist is `not_installed` (skipped) when picked
+    implicitly, and an error when named in `only`. `full` ignores saved incremental
+    state (every file/database is re-read; still zero duplicates).
+    """
     data = Path(data_dir) if data_dir else paths.data_dir()
     names = list(only) if only else list(connectors)
     unknown = [n for n in names if n not in connectors]
@@ -94,6 +112,7 @@ def sync(
         raise ValueError(f"unknown source(s): {', '.join(unknown)}")
     if project_configs is not None:
         sync_projects(conn, project_configs)
+        relink_sessions(conn)
     results = []
     for name in names:
         connector = connectors[name]
@@ -103,14 +122,53 @@ def sync(
             continue
         path = (source_paths or {}).get(name) or connector.default_source_path()
         try:
-            results.append(_sync_one(conn, connector, path, data))
+            absent = _absent(connector, path, explicit=bool(only))
+            if absent is not None:
+                results.append(absent)
+                continue
+            results.append(_sync_one(conn, connector, path, data, full=full))
         except (ConnectorError, OSError, sqlite3.Error) as exc:
             results.append(SourceResult(name, status="error", error=f"{type(exc).__name__}: {exc}"))
     return results
 
 
+def _absent(connector: Connector, path: Path, *, explicit: bool) -> SourceResult | None:
+    """Permission-check, then report storage that does not exist (None when it does).
+
+    The access check runs first so a denylisted path fails loud even if absent.
+    """
+    enforce_access(connector, path)
+    if Path(path).exists():
+        return None
+    if explicit:
+        return SourceResult(
+            connector.name, status="error", error=f"source not installed: {path} does not exist"
+        )
+    return SourceResult(connector.name, status="not_installed", detail=str(path))
+
+
+def _fetch(connector: Connector, path: Path, blob_store: BlobStore, tmp: Path, state: SyncState):
+    kwargs = {"blob_store": blob_store, "tmp_dir": tmp}
+    if "state" in inspect.signature(connector.fetch).parameters:
+        kwargs["state"] = state
+    return connector.fetch(path, **kwargs)
+
+
+def _collect_stats(connector: Connector, result: SourceResult, state: SyncState) -> None:
+    stats = getattr(connector, "last_stats", None)
+    if stats is not None:
+        result.skipped_records = sum(getattr(stats, "skipped", {}).values())
+        result.warnings = list(getattr(stats, "warnings", []))
+    result.unchanged_units = state.unchanged
+
+
 def _sync_one(
-    conn: sqlite3.Connection, connector: Connector, source_path: Path, data: Path
+    conn: sqlite3.Connection,
+    connector: Connector,
+    source_path: Path,
+    data: Path,
+    *,
+    full: bool = False,
 ) -> SourceResult:
     enforce_access(connector, source_path)
     result = SourceResult(connector.name)
@@ -122,10 +180,11 @@ def _sync_one(
     blob_store = BlobStore(data)
     roots = load_roots(conn)
     known_sessions: set[str] = set()
+    state = SyncState(conn, connector.name, use_saved=not full)
     pending = 0
     conn.execute("BEGIN")
     try:
-        for record in connector.fetch(source_path, blob_store=blob_store, tmp_dir=data / "tmp"):
+        for record in _fetch(connector, source_path, blob_store, data / "tmp", state):
             if isinstance(record, RawSession):
                 _upsert_session(conn, record, roots, known_sessions, result)
             else:
@@ -135,6 +194,7 @@ def _sync_one(
                 conn.execute("COMMIT")
                 conn.execute("BEGIN")
                 pending = 0
+        state.flush(conn)  # cursors commit atomically with the events they cover
         conn.execute(
             "UPDATE sources SET last_sync = ? WHERE name = ?",
             (datetime.now(UTC).isoformat(timespec="seconds"), connector.name),
@@ -144,6 +204,7 @@ def _sync_one(
         if conn.in_transaction:
             conn.execute("ROLLBACK")
         raise
+    _collect_stats(connector, result, state)
     return result
 
 
@@ -155,21 +216,26 @@ def _upsert_session(
     result: SourceResult,
 ) -> None:
     sid = f"{s.source}:{s.source_session_id}"
-    existed = conn.execute("SELECT 1 FROM sessions WHERE id = ?", (sid,)).fetchone()
+    existed = conn.execute("SELECT cwd FROM sessions WHERE id = ?", (sid,)).fetchone()
+    # An incremental sync may see only part of a session; never erase what is known.
+    cwd = s.cwd or (existed["cwd"] if existed else None)
     conn.execute(
         "INSERT INTO sessions(id, source, source_session_id, project_id, started_at, ended_at,"
         " cwd, model, agent, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,"
-        " ended_at=excluded.ended_at, cwd=excluded.cwd, model=excluded.model,"
-        " agent=excluded.agent, title=excluded.title",
+        " ended_at=max(coalesce(sessions.ended_at, excluded.ended_at),"
+        " coalesce(excluded.ended_at, sessions.ended_at)),"
+        " cwd=coalesce(excluded.cwd, sessions.cwd), model=coalesce(excluded.model, sessions.model),"
+        " agent=coalesce(excluded.agent, sessions.agent),"
+        " title=coalesce(excluded.title, sessions.title)",
         (
             sid,
             s.source,
             s.source_session_id,
-            link_project(s.cwd, roots),
+            link_project(cwd, roots),
             s.started_at,
             s.ended_at,
-            s.cwd,
+            cwd,
             s.model,
             s.agent,
             s.title,
@@ -197,8 +263,12 @@ def _insert_event(
             raise ConnectorError(f"event {ev.source_id!r} references missing blob {ev.blob_ref}")
         result.blobs += 1
     session_id = f"{ev.source}:{ev.session_ref}" if ev.session_ref else None
-    if session_id not in known:
-        session_id = None
+    if session_id is not None and session_id not in known:
+        # not yielded this run (incremental sync): still link if it is already stored
+        if conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone():
+            known.add(session_id)
+        else:
+            session_id = None
     project_id = None
     if session_id:
         row = conn.execute("SELECT project_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -254,12 +324,17 @@ def dry_run(
             path = (source_paths or {}).get(name) or connector.default_source_path()
             result = SourceResult(name, dry_run=True)
             try:
-                enforce_access(connector, path)
+                absent = _absent(connector, path, explicit=bool(only))
+                if absent is not None:
+                    absent.dry_run = True
+                    results.append(absent)
+                    continue
                 result.schema_version = connector.check_version(path)
                 with tempfile.TemporaryDirectory(prefix="ctx-dry-run-") as tmp:
                     store = BlobStore(Path(tmp))
                     for record in connector.fetch(path, blob_store=store, tmp_dir=Path(tmp) / "t"):
                         _count(existing, record, result)
+                _collect_stats(connector, result, SyncState())
             except (ConnectorError, OSError, sqlite3.Error) as exc:
                 result.status = "error"
                 result.error = f"{type(exc).__name__}: {exc}"

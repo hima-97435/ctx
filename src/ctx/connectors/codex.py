@@ -34,6 +34,7 @@ from ctx.connectors.jsonl_common import (
 from ctx.core.blobs import BlobStore
 from ctx.core.model import RawEvent, RawSession
 from ctx.core.redact import redact_file_text_counted
+from ctx.core.sync_state import SyncState, fingerprint
 
 SOURCE = "codex"
 SOURCE_ROOT = Path.home() / ".codex"
@@ -161,12 +162,20 @@ class CodexConnector:
         return f"{SCHEMA_VERSION_PIN}:cli-{cli_version}" if cli_version else SCHEMA_VERSION_PIN
 
     def fetch(
-        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+        self,
+        source_path: Path,
+        *,
+        blob_store: BlobStore,
+        tmp_dir: Path,
+        state: SyncState | None = None,
     ) -> Iterator[RawSession | RawEvent]:
         self.check_version(source_path)
         stats = self.last_stats = IngestStats()
         files = self._files(source_path, stats)
         stats.files = len(files)
+        state = state or SyncState()
+        prints = {f: fingerprint(f) for f in files}  # before reading (ADR-024)
+        files = [f for f in files if not state.is_unchanged(f"file:{f}", prints[f])]
         sessions = [s for f in files if (s := self._session(f)) is not None]
         sessions.sort(key=lambda s: (s.started_at, s.source_session_id))
         by_id = {s.source_session_id: s for s in sessions}
@@ -174,6 +183,7 @@ class CodexConnector:
         seen: set[str] = set()
         for f in files:
             yield from self._events(f, blob_store, stats, seen)
+            state.stage(f"file:{f}", prints[f])
 
     def _session(self, path: Path) -> RawSession | None:
         meta = None

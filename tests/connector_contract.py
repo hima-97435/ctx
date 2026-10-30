@@ -235,7 +235,14 @@ class ConnectorContract:
         second = sync(conn, {connector.name: connector}, **kwargs)[0]
         assert second.status == "ok"
         assert second.events_new == 0 and second.sessions_new == 0
-        assert second.events_duplicate == first.events_new
+        assert second.unchanged_units >= 1  # incremental: nothing changed, nothing re-read
+        # state is derived: deleting it (or --full) means a full rescan, still no duplicates
+        conn.execute("DELETE FROM sync_state")
+        third = sync(conn, {connector.name: connector}, **kwargs)[0]
+        assert third.events_new == 0 and third.sessions_new == 0
+        assert third.events_duplicate == first.events_new and third.unchanged_units == 0
+        full = sync(conn, {connector.name: connector}, full=True, **kwargs)[0]
+        assert full.events_new == 0 and full.events_duplicate == first.events_new
         again = conn.execute(
             "SELECT id, source_id, content_hash FROM events ORDER BY id"
         ).fetchall()

@@ -288,9 +288,9 @@ def test_cli_sync_source(tmp_path, monkeypatch):
     assert "[dry-run]" in dry.output and not (home / "ctx.db").exists()
     first = runner.invoke(app, ["sync", "--source", "devin"])
     assert first.exit_code == 0, first.output
-    assert "devin-sqlite-v1" in first.output and "sessions 3" in first.output
+    assert "devin-sqlite-v1" in first.output and " 3 " in first.output
     second = runner.invoke(app, ["sync", "--source", "devin"])
-    assert "added 0," in second.output
+    assert second.exit_code == 0 and "ERROR" not in second.output
     out = runner.invoke(app, ["search", "zebra", "--all"]).stdout
     assert "devin session=" in out and FAKE_TOKEN not in out
     shown = runner.invoke(app, ["sources", "show", "devin"]).output

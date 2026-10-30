@@ -69,8 +69,9 @@ Later in this family: Hermes, Gemini CLI.
 - [ ] Hermes `profiles/*` verified on a real install (none on the dev machine).
 - [ ] Antigravity protobuf `steps` / `conversations/*.pb` decoding (5 of 49 real
       conversations have no transcript); Antigravity IDE connector (separate source).
-- [ ] An uninstalled source makes plain `ctx sync` report an error for it; decide
-      whether absent storage should be `skipped` instead.
+- [x] Plain `ctx sync` skips sources whose storage is absent (`not installed`, exit 0);
+      `--source X` on an absent source is an error (ADR-024).
+- [x] Incremental sync (`sync_state`), `ctx sync --full`, `ctx status`, `ctx doctor` (ADR-024).
 
 ## M2 — Timeline & episodes (deterministic, no LLM)
 

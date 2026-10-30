@@ -121,6 +121,23 @@ blob holds the full raw record, so nothing is lost by truncating `text`.
 redaction precedes spilling (ADR-012) — and are content-addressed: identical
 content is stored once.
 
+## Derived: sync_state (incremental cursors; migration 0004, ADR-024)
+
+```sql
+CREATE TABLE sync_state (
+  source     TEXT NOT NULL,
+  key        TEXT NOT NULL,          -- e.g. 'file:/abs/path.jsonl', 'db:/abs/state.db'
+  value      TEXT NOT NULL,          -- JSON; today [[size, mtime_ns], ...] fingerprints
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (source, key)
+);
+```
+
+Not events and not user state: derived and rebuildable. Deleting rows (or the whole
+table's contents) only causes a full re-read on the next sync; `UNIQUE(source,
+source_id)` guarantees zero duplicates. Written in the same transaction as the events
+they describe.
+
 ## Derived: episodes & facts (rebuildable)
 
 ```sql

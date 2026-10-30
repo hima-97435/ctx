@@ -136,10 +136,24 @@ _MIGRATION_0003_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE projects ADD COLUMN mcp_exclude INTEGER NOT NULL DEFAULT 0",
 )
 
+# Incremental-sync cursors: derived and rebuildable, safe to delete (ADR-024).
+_MIGRATION_0004_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE sync_state (
+      source     TEXT NOT NULL,
+      key        TEXT NOT NULL,
+      value      TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (source, key)
+    )
+    """,
+)
+
 MIGRATIONS: list[tuple[str, tuple[str, ...]]] = [
     ("0001_initial", _MIGRATION_0001_STATEMENTS),
     ("0002_event_message_id", _MIGRATION_0002_STATEMENTS),
     ("0003_project_mcp_exclude", _MIGRATION_0003_STATEMENTS),
+    ("0004_sync_state", _MIGRATION_0004_STATEMENTS),
 ]
 
 

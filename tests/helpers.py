@@ -75,12 +75,12 @@ class FakeConnector:
         self.events = events if events is not None else []
 
     def default_source_path(self) -> Path:
-        return self.root / "fake.src"
+        return self.root
 
     def check_version(self, source_path: Path) -> str:
         return "fake-1"
 
-    def fetch(self, source_path, *, blob_store, tmp_dir):
+    def fetch(self, source_path, *, blob_store, tmp_dir, state=None):
         yield RawSession("fake", "s1", 1000, None, "/tmp/proj", None, None, "fake session")
         yield from self.events
 

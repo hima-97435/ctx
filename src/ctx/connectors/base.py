@@ -12,6 +12,7 @@ from typing import Protocol
 
 from ctx.core.blobs import BlobStore
 from ctx.core.model import RawEvent, RawSession
+from ctx.core.sync_state import SyncState
 
 
 class ConnectorError(Exception):
@@ -57,6 +58,10 @@ class Connector(Protocol):
     `fetch` must run `check_version` first and raise ConnectorError before yielding
     anything; it yields every RawSession before the RawEvents that reference it.
     Events arrive already redacted, truncated and with any blob already fsynced.
+
+    `fetch` may accept an optional `state: SyncState` (ADR-024): skip units whose
+    cursor matches (`state.is_unchanged`) and `state.stage` the cursor of each unit
+    after it was fully read. Without state (or with it empty) everything is read.
     """
 
     name: str
@@ -70,5 +75,10 @@ class Connector(Protocol):
     def check_version(self, source_path: Path) -> str: ...
 
     def fetch(
-        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+        self,
+        source_path: Path,
+        *,
+        blob_store: BlobStore,
+        tmp_dir: Path,
+        state: SyncState | None = None,
     ) -> Iterator[RawSession | RawEvent]: ...

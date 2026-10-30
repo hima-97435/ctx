@@ -14,6 +14,7 @@ from ctx.core.context import build_context
 from ctx.core.db import connect
 from ctx.core.projects import load_projects_config
 from ctx.core.search import parse_when, search
+from ctx.core.status import collect_status, run_doctor
 from ctx.core.sync import SourceResult, dry_run, rebuild_fts
 from ctx.core.sync import sync as run_sync
 
@@ -69,28 +70,49 @@ def sources_show(name: str) -> None:
     typer.echo(f"denylist_tables:     {', '.join(sorted(connector.denylist_tables)) or '-'}")
 
 
+_STATUS_LABEL = {
+    "ok": "ok",
+    "skipped": "disabled",
+    "not_installed": "not installed",
+    "error": "ERROR",
+}
+
+
 def _print_results(results: list[SourceResult]) -> None:
+    if any(r.dry_run for r in results):
+        typer.echo("[dry-run] nothing is written; counts are what a sync would add")
+    typer.echo(
+        f"{'SOURCE':<18} {'STATUS':<14} {'SESSIONS+':>9} {'EVENTS+':>8} {'DUP':>6} "
+        f"{'SKIPPED':>8} {'UNCHANGED':>9} {'WARNINGS':>8} SCHEMA"
+    )
     for r in results:
-        prefix = "[dry-run] " if r.dry_run else ""
+        typer.echo(
+            f"{r.source:<18} {_STATUS_LABEL.get(r.status, r.status):<14} {r.sessions_new:>9} "
+            f"{r.events_new:>8} {r.events_duplicate:>6} {r.skipped_records:>8} "
+            f"{r.unchanged_units:>9} {len(r.warnings):>8} {r.schema_version or '-'}"
+        )
+    for r in results:
+        if r.status == "not_installed":
+            typer.echo(f"{r.source}: not installed (no storage at {r.detail}); skipped")
+        for w in r.warnings:
+            typer.echo(f"{r.source}: warning: {w}")
         if r.status == "error":
-            typer.echo(f"{prefix}{r.source}: ERROR {r.error}", err=True)
-        elif r.status == "skipped":
-            typer.echo(f"{prefix}{r.source}: skipped (disabled)")
-        else:
-            verb = "would add" if r.dry_run else "added"
-            typer.echo(
-                f"{prefix}{r.source}: schema {r.schema_version}; sessions {r.sessions_seen} "
-                f"({verb} {r.sessions_new}); events {r.events_seen} ({verb} {r.events_new}, "
-                f"{r.events_duplicate} already present); blobs referenced {r.blobs}"
-            )
+            typer.echo(f"{r.source}: ERROR {r.error}", err=True)
 
 
 @app.command()
 def sync(
     source: list[str] = typer.Option(None, "--source", "-s", help="Only this source (repeatable)."),
     dry_run_flag: bool = typer.Option(False, "--dry-run", help="Report only; write nothing."),
+    full: bool = typer.Option(
+        False, "--full", help="Ignore incremental state; re-read everything."
+    ),
 ) -> None:
-    """Import enabled sources into the database (idempotent)."""
+    """Import enabled sources into the database (idempotent, incremental).
+
+    Sources whose storage is absent are skipped ("not installed"); naming one with
+    --source is an error. Version-pin, denylist and corrupt-data failures are errors.
+    """
     connectors = available_connectors()
     try:
         if dry_run_flag:
@@ -98,11 +120,47 @@ def sync(
         else:
             conn = connect(paths.db_path())
             configs = load_projects_config(paths.config_path())
-            results = run_sync(conn, connectors, only=source or None, project_configs=configs)
+            results = run_sync(
+                conn, connectors, only=source or None, project_configs=configs, full=full
+            )
     except ValueError as exc:
         raise _fail(str(exc)) from exc
     _print_results(results)
     if any(r.status == "error" for r in results):
+        raise typer.Exit(1)
+
+
+@app.command("status")
+def status_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+    """Per-source install state, path, last sync and counts; DB path; project count."""
+    data = collect_status(available_connectors(), paths.db_path())
+    if as_json:
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
+        return
+    typer.echo(f"database: {data['db_path']}" + ("" if data["db_exists"] else " (not created yet)"))
+    typer.echo(f"projects: {data['projects']}   events: {data['events_total']}")
+    typer.echo(
+        f"{'SOURCE':<18} {'INSTALLED':<10} {'SESSIONS':>8} {'EVENTS':>8} {'LAST SYNC':<26} PATH"
+    )
+    for s in data["sources"]:
+        typer.echo(
+            f"{s['name']:<18} {'yes' if s['installed'] else 'no':<10} {s['sessions']:>8} "
+            f"{s['events']:>8} {s['last_sync'] or '-':<26} {s['path']}"
+        )
+
+
+@app.command("doctor")
+def doctor_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+    """Check FTS integrity, schema version, FTS5 support and a writable data dir."""
+    checks = run_doctor(paths.db_path())
+    if as_json:
+        typer.echo(json.dumps([c.as_dict() for c in checks], indent=2, ensure_ascii=False))
+    else:
+        for c in checks:
+            typer.echo(f"[{c.status}] {c.name}: {c.detail}")
+            if c.fix and c.status != "ok":
+                typer.echo(f"      fix: {c.fix}")
+    if any(c.status == "fail" for c in checks):
         raise typer.Exit(1)
 
 

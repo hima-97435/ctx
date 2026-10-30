@@ -182,3 +182,31 @@ only stored cwd/workspace values (rule 7); Hermes sessions without `cwd` stay
 unlinked. (6) `ctx sync` with no `--source` now reports an error for each source whose
 storage is not installed (same as Codex before); making absence a `skipped` status is
 left as a roadmap item. `ctx mcp config --client hermes` already existed (unverified).
+
+### 2026-10-31 · ADR-024 · Absent sources, incremental sync state, status and doctor
+Resolves the ADR-023 roadmap item. Choices: (1) **Absent storage is a skip, not an
+error**, but only for implicit selection: plain `ctx sync` marks a source whose path
+does not exist `not_installed` (exit 0); `ctx sync --source X` on it is an error
+(exit 1). The access check (allowed paths + denylist) runs *before* the existence
+check, so a denylisted path still fails loud, and anything that exists keeps failing
+loud on version-pin mismatch or corrupt data. (2) **`sync_state` table** (migration
+0004), keyed `(source, key)` with a JSON value, written by the engine in the same
+transaction as the events; connectors only `stage` cursors. It is derived, so
+deleting it is always safe (full rescan, `INSERT OR IGNORE`, zero duplicates);
+unparsable values count as absent. (3) **Cursor = `[size, mtime_ns]` per JSONL file
+and per SQLite DB (plus its `-wal`)**, taken before reading. Any change re-reads the
+whole unit, so truncation/rewrite/same-size edits are all caught. A max-rowid
+watermark was rejected for filtering: file-aware redaction pairs a tool result with
+its earlier tool call, and reading only new rows would lose that pairing (a
+redaction regression, rule 4). Antigravity always re-yields sessions (titles/cwd come
+from side files) and skips only unchanged transcripts' events. (4) **Session upsert
+merges** (`coalesce` for cwd/model/agent/title, max `ended_at`) and events link to a
+session already stored by an earlier run, because incremental scans see only part of a
+session. Project links are re-derived from stored `cwd` on every sync (config edits
+must take effect without re-reading sources). (5) The engine passes `state` only to
+connectors whose `fetch` accepts it, so older connectors keep working. (6)
+`ctx status` and `ctx doctor` open the DB `mode=ro`: they never create or migrate it.
+Doctor's FTS check compares `events` with `events_fts_docsize` (an external-content
+FTS `count(*)` just reads `events`); fix is `ctx reindex`. (7) `ctx sync` prints a
+per-source table (sessions+, events+, duplicates, skipped, unchanged, warnings,
+schema) replacing the one-line-per-source format.

@@ -42,6 +42,7 @@ from ctx.core.redact import (
     redact_counted,
     redact_file_text_counted,
 )
+from ctx.core.sync_state import SyncState, fingerprint
 from ctx.core.truncate import SPILL_THRESHOLD_CHARS, prepare_text
 
 SOURCE = "opencode"
@@ -327,9 +328,19 @@ class OpenCodeConnector:
             conn.close()
 
     def fetch(
-        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+        self,
+        source_path: Path,
+        *,
+        blob_store: BlobStore,
+        tmp_dir: Path,
+        state: SyncState | None = None,
     ) -> Iterator[RawSession | RawEvent]:
         self.check_version(source_path)  # fail loud before reading content or yielding
+        state = state or SyncState()
+        db = Path(source_path)
+        print_ = fingerprint(db, db.with_name(db.name + "-wal"))  # before reading (ADR-024)
+        if state.is_unchanged(f"db:{db}", print_):
+            return
         conn = open_snapshot(
             source_path,
             tmp_dir=tmp_dir,
@@ -339,6 +350,7 @@ class OpenCodeConnector:
         try:
             yield from iter_sessions(conn)
             yield from iter_events(conn, blob_store=blob_store)
+            state.stage(f"db:{db}", print_)
         finally:
             conn.close()
             (Path(tmp_dir) / "opencode-snapshot.db").unlink(missing_ok=True)

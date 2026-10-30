@@ -50,6 +50,7 @@ from ctx.connectors.sqlite_common import connect_readonly, missing_columns, open
 from ctx.core.blobs import BlobStore
 from ctx.core.model import RawEvent, RawSession
 from ctx.core.redact import redact, redact_file_text_counted
+from ctx.core.sync_state import SyncState, fingerprint
 
 SOURCE = "antigravity_cli"
 SCHEMA_VERSION_PIN = "antigravity-cli-transcript-v1"
@@ -206,7 +207,12 @@ class AntigravityCliConnector:
 
     # ---- fetch -----------------------------------------------------------------------------
     def fetch(
-        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+        self,
+        source_path: Path,
+        *,
+        blob_store: BlobStore,
+        tmp_dir: Path,
+        state: SyncState | None = None,
     ) -> Iterator[RawSession | RawEvent]:
         self.check_version(source_path)  # fail loud before reading content or yielding
         files = self._transcripts(source_path)
@@ -234,9 +240,16 @@ class AntigravityCliConnector:
                 agent=m.agent or "antigravity",
                 title=m.title,
             )
+        # Sessions are always yielded (titles/cwd come from side files that can change
+        # without the transcript changing); only unchanged transcripts' events are skipped.
+        state = state or SyncState()
         seen: set[str] = set()
         for f in files:
+            key, print_ = f"file:{f}", fingerprint(f)
+            if state.is_unchanged(key, print_):
+                continue
             yield from self._events(f, blob_store, stats, seen)
+            state.stage(key, print_)
 
     def _metadata(self, root: Path, ids: set[str], tmp_dir: Path) -> dict[str, _Meta]:
         meta: dict[str, _Meta] = {cid: _Meta() for cid in ids}

@@ -36,6 +36,7 @@ from ctx.connectors.jsonl_common import (
 from ctx.core.blobs import BlobStore
 from ctx.core.model import RawEvent, RawSession
 from ctx.core.redact import redact_file_text_counted
+from ctx.core.sync_state import SyncState, fingerprint
 
 SOURCE = "claude_code"
 SOURCE_ROOT = Path.home() / ".claude"
@@ -169,15 +170,24 @@ class ClaudeCodeConnector:
 
     # ---- fetch ---------------------------------------------------------------------------
     def fetch(
-        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+        self,
+        source_path: Path,
+        *,
+        blob_store: BlobStore,
+        tmp_dir: Path,
+        state: SyncState | None = None,
     ) -> Iterator[RawSession | RawEvent]:
         self.check_version(source_path)  # fail loud before reading content or yielding
         files = self._files(source_path)
         stats = self.last_stats = IngestStats(files=len(files))
-        yield from self._sessions(files)
+        state = state or SyncState()
+        prints = {f: fingerprint(f) for f in files}  # before reading (ADR-024)
+        changed = [f for f in files if not state.is_unchanged(f"file:{f}", prints[f])]
+        yield from self._sessions(changed)
         seen: set[str] = set()
-        for f in files:
+        for f in changed:
             yield from self._events(f, blob_store, stats, seen)
+            state.stage(f"file:{f}", prints[f])
 
     def _sessions(self, files: list[Path]) -> Iterator[RawSession]:
         sessions: dict[str, _SessionAcc] = {}

@@ -99,5 +99,27 @@ def sync_projects(conn: sqlite3.Connection, configs: list[ProjectConfig]) -> Non
         raise
 
 
+def relink_sessions(conn: sqlite3.Connection) -> None:
+    """Re-derive every session's project from its stored cwd (config may have changed).
+
+    Incremental sync does not re-read unchanged sources, so linking cannot depend on
+    sessions being re-yielded. Events keep the project they were stored with.
+    """
+    roots = load_roots(conn)
+    conn.execute("BEGIN")
+    try:
+        rows = conn.execute("SELECT id, cwd, project_id FROM sessions WHERE cwd IS NOT NULL")
+        for row in rows.fetchall():
+            project = link_project(row["cwd"], roots)
+            if project != row["project_id"]:
+                conn.execute(
+                    "UPDATE sessions SET project_id = ? WHERE id = ?", (project, row["id"])
+                )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def load_roots(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(r["project_id"], r["root_path"]) for r in conn.execute("SELECT * FROM project_roots")]

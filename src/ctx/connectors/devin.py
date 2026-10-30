@@ -51,6 +51,7 @@ from ctx.connectors.sqlite_common import (
 from ctx.core.blobs import BlobStore
 from ctx.core.model import RawEvent, RawSession
 from ctx.core.redact import redact, redact_file_text_counted
+from ctx.core.sync_state import SyncState, fingerprint
 
 SOURCE = "devin"
 SCHEMA_VERSION_PIN = "devin-sqlite-v1"
@@ -197,16 +198,26 @@ class DevinConnector:
 
     # ---- fetch -----------------------------------------------------------------------
     def fetch(
-        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+        self,
+        source_path: Path,
+        *,
+        blob_store: BlobStore,
+        tmp_dir: Path,
+        state: SyncState | None = None,
     ) -> Iterator[RawSession | RawEvent]:
         self.check_version(source_path)  # fail loud before reading content or yielding
         db = self._database(source_path)
         stats = self.last_stats = IngestStats(files=1)
+        state = state or SyncState()
+        print_ = fingerprint(db, db.with_name(db.name + "-wal"))  # before reading (ADR-024)
+        if state.is_unchanged(f"db:{db}", print_):
+            return
         snapshot = Path(tmp_dir) / "devin-snapshot.db"
         conn = open_snapshot(db, Path(tmp_dir), snapshot.name)
         try:
             yield from self._sessions(conn)
             yield from self._events(conn, blob_store, stats)
+            state.stage(f"db:{db}", print_)
         finally:
             conn.close()
             snapshot.unlink(missing_ok=True)

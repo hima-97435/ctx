@@ -37,9 +37,11 @@ def test_sync_imports_sessions_and_events(env):
 
 def test_resync_zero_duplicates_and_blob_not_rewritten(env):
     first = run(env)
-    second = run(env)
-    assert second.events_new == 0 and second.events_duplicate == first.events_new
-    assert second.sessions_new == 0
+    second = run(env)  # incremental: the database did not change, so it is not re-read
+    assert second.events_new == 0 and second.unchanged_units == 1 and second.events_seen == 0
+    full = run(env, full=True)
+    assert full.events_new == 0 and full.events_duplicate == first.events_new
+    assert full.sessions_new == 0
     assert env[1].execute("SELECT count(*) FROM events").fetchone()[0] == 9
 
 

@@ -88,7 +88,8 @@ class Connector(Protocol):
     denylist_tables: list[str]         # DB tables never queried (e.g. "credential")
 
     def check_version(self, source_path: Path) -> str: ...   # raises ConnectorError
-    def fetch_changes(self, state: SyncState) -> Iterator[RawEvent]: ...
+    def fetch(self, source_path, *, blob_store, tmp_dir,
+              state: SyncState | None = None) -> Iterator[RawSession | RawEvent]: ...
 ```
 
 - **Source permission records** (table `sources`): `enabled`, `allowed_paths`,
@@ -107,6 +108,22 @@ class Connector(Protocol):
   longest cwd prefix, and inserts with `INSERT OR IGNORE` (events are never updated).
   `ctx sync --dry-run` writes nothing. Connectors are registered in
   `src/ctx/connectors/registry.py`.
+- **Absent sources** (ADR-024). After the access check, a source whose path does not
+  exist is `not_installed` and skipped when sync was not given `--source`; naming it
+  explicitly is an error. Present sources fail loud as before.
+- **Incremental state** (`src/ctx/core/sync_state.py`, table `sync_state`). A connector
+  may accept `state`: it skips a unit (JSONL file, SQLite DB incl. its `-wal`) whose
+  `[size, mtime_ns]` fingerprint matches, and `stage`s the fingerprint (taken *before*
+  reading) after the unit was fully read. The engine writes staged cursors in the same
+  transaction as the events, so a failed run records nothing. Any change (growth,
+  truncation, rewrite) re-reads the whole unit; `INSERT OR IGNORE` keeps that
+  duplicate-free, which is also why deleting the state (or `ctx sync --full`) is
+  always safe. Rows are never filtered by a row cursor, because tool-result redaction
+  needs the earlier tool call from the same unit. Sessions merge (`coalesce`, max
+  `ended_at`) so a partial scan never erases known data, and project links are
+  re-derived from stored `cwd` on every sync.
+- **`ctx status` / `ctx doctor`** (`src/ctx/core/status.py`) open the database
+  read-only (`mode=ro`) and never create or migrate it.
 - The contract suite is a reusable class (`ConnectorContract`); a connector's test
   module subclasses it and supplies fixtures (see `tests/test_opencode_contract.py`).
 - Details per source: `docs/CONNECTORS.md`.

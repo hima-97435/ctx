@@ -35,11 +35,22 @@ uv sync             # creates .venv, installs deps, writes uv.lock
 ```sh
 ctx sources list              # registered sources and their permissions
 ctx sync --dry-run            # report what would be imported; writes nothing
-ctx sync                      # import all enabled sources (idempotent)
+ctx sync                      # import all enabled sources (idempotent, incremental)
+ctx sync --source hermes      # one source; an absent (not installed) one is an error
+ctx sync --full               # ignore incremental state and re-read everything
+ctx status [--json]           # per source: installed?, path, last sync, sessions/events; DB path
+ctx doctor [--json]           # FTS integrity, schema version, FTS5, writable data dir (+ fixes)
 ctx search "redaction pipeline" --project ctx [--source S --since 7d --until DATE --all --limit N --json]
 ctx context "redaction pipeline" --project ctx --budget 2000   # budgeted, cited context
 ctx reindex                   # rebuild the FTS index from events
 ```
+
+Plain `ctx sync` **skips** sources whose storage does not exist (shown as
+`not installed`, exit 0) but still fails loud (exit 1) on a version-pin mismatch,
+denylist violation or corrupt data in a source that is present. It prints one table
+row per source: sessions/events added, duplicates, skipped records, unchanged
+files/databases skipped by incremental state, and warnings. Unchanged JSONL files and
+SQLite databases are not re-read; the state is derived and safe to delete.
 
 ### MCP server (use ctx as memory from any coding agent)
 

@@ -48,6 +48,7 @@ from ctx.connectors.sqlite_common import (
 from ctx.core.blobs import BlobStore
 from ctx.core.model import RawEvent, RawSession
 from ctx.core.redact import redact, redact_file_text_counted
+from ctx.core.sync_state import SyncState, fingerprint
 
 SOURCE = "hermes"
 SCHEMA_VERSION_PIN = "hermes-sqlite-v1"
@@ -227,11 +228,19 @@ class HermesConnector:
 
     # ---- fetch ----------------------------------------------------------------------------
     def fetch(
-        self, source_path: Path, *, blob_store: BlobStore, tmp_dir: Path
+        self,
+        source_path: Path,
+        *,
+        blob_store: BlobStore,
+        tmp_dir: Path,
+        state: SyncState | None = None,
     ) -> Iterator[RawSession | RawEvent]:
         self.check_version(source_path)  # fail loud before reading content or yielding
         dbs = self._databases(source_path)
         stats = self.last_stats = IngestStats(files=len(dbs))
+        state = state or SyncState()
+        prints = {db: fingerprint(db, db.with_name(db.name + "-wal")) for db in dbs}
+        dbs = [db for db in dbs if not state.is_unchanged(f"db:{db}", prints[db])]
         snaps: list[tuple[str, sqlite3.Connection, Path]] = []
         try:
             for i, db in enumerate(dbs):
@@ -243,6 +252,8 @@ class HermesConnector:
                 yield from self._sessions(conn, profile)
             for profile, conn, _p in snaps:
                 yield from self._events(conn, profile, blob_store, stats)
+            for db in dbs:
+                state.stage(f"db:{db}", prints[db])
         finally:
             for _profile, conn, snap_path in snaps:
                 conn.close()
