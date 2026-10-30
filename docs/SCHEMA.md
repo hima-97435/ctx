@@ -186,6 +186,30 @@ member event (all kinds). Migration `0005` made `project_id` nullable and added 
 The timeline's per-day split, counts, titles, top files and commands are computed at
 query time from events and are not stored.
 
+## Embeddings (optional, derived)
+
+```sql
+CREATE TABLE embeddings (
+  event_id   INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  chunk_idx  INTEGER NOT NULL,                 -- deterministic chunk number within the event
+  model      TEXT NOT NULL,                    -- embedder spec, e.g. 'model2vec:minishlab/potion-base-8M'
+  dim        INTEGER NOT NULL,
+  vector     BLOB NOT NULL,                    -- float32 x dim, L2-normalized (cosine = dot)
+  text_hash  TEXT NOT NULL,                    -- sha256 of the redacted chunk text
+  PRIMARY KEY (event_id, chunk_idx, model)
+);
+CREATE INDEX embeddings_hash_idx ON embeddings(model, text_hash);
+```
+
+Migration `0006`. Derived and rebuildable from `events` alone (`ctx embed --rebuild`);
+safe to drop. Chunking (`core/embed.py:chunk_text`) is a pure function of the redacted
+text: paragraphs, then lines, then fixed-width slices, packed up to 1000 characters, at
+most 16 chunks per event (head only; FTS still covers the rest). `ctx embed` is
+incremental: a chunk whose `(event, idx, text_hash)` row exists is skipped, identical
+text reuses its vector, only new text reaches the embedder. Vectors of different
+`model` values live side by side; search uses the configured model only. Vector search
+is brute-force cosine in numpy over the rows that pass the same filters as FTS.
+
 ## Data directory layout
 
 The data dir is `$CTX_HOME`, else `$CTX_DATA_DIR`, else a per-OS user dir (macOS

@@ -17,3 +17,10 @@ def _isolate_ctx_env(tmp_path, monkeypatch):
         monkeypatch.setenv(f"CTX_SOURCE_ROOT_{name}", str(tmp_path / f"no_{name.lower()}"))
     for var in ("HERMES_HOME", "CHISEL_SESSION_DB", "AGY_CONVERSATIONS_DIR"):
         monkeypatch.delenv(var, raising=False)
+
+
+# Offline embedders for specs like CTX_EMBED_MODEL=fake:trigram (never a real model).
+from ctx.core.embed import register_embedder  # noqa: E402
+from tests.fake_embedder import FakeEmbedder  # noqa: E402
+
+register_embedder("fake", lambda arg: FakeEmbedder(name=f"fake:{arg}" if arg else "fake:trigram"))

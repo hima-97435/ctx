@@ -263,3 +263,52 @@ shaped tool text is skipped. Values are redacted and clipped; commands use the f
 line only. "Top terms" from the original roadmap was dropped (needs a stoplist; a
 heuristic would be an undocumented guess). On Windows the `zoneinfo` database needs the
 `tzdata` package for named zones; not added as a dependency yet.
+
+### 2026-10-31 · ADR-027 · Hybrid search: local embeddings as a derived table, RRF fusion
+Fulfils ADR-001's "embeddings live in a separate rebuildable table". (1) Table
+`embeddings(event_id, chunk_idx, model, dim, vector, text_hash)` (migration 0006), built
+only from `redact(events.text)`, chunked deterministically (<=1000 chars, <=16 chunks per
+event); incremental by `text_hash`; droppable and rebuilt by `ctx embed --rebuild`.
+(2) Default embedder: **model2vec** `minishlab/potion-base-8M` (optional extra `embed` =
+model2vec + numpy). Alternatives: fastembed (ONNX; better quality per model but pulls
+onnxruntime and ~100+ MB models), sentence-transformers (torch, rejected). Reason:
+static embeddings are tiny (~30 MB), CPU-only, millisecond-fast, no torch, which fits
+local-first and keeps the base install untouched; quality is lower than transformer
+embedders, so the `Embedder` interface (`name`, `dim`, `is_cloud`, `embed`) and the
+`model` column allow swapping (fastembed later) without a schema change. The first use
+downloads model files from the Hugging Face hub (no ctx data leaves the machine); tests
+never download (a deterministic fake embedder; the one real-model test skips unless the
+model is cached). (3) Vector search is brute-force cosine in numpy over the rows passing
+the same SQL filters as FTS (`build_filters` is shared); sqlite-vec deferred as
+unnecessary at this scale. numpy is only in the extra (and dev group). (4) Hybrid =
+Reciprocal Rank Fusion, `sum 1/(60+rank)`, over the top `max(4*limit, 50)` of each
+ranker, events deduplicated across chunks by best chunk; FTS keeps its highlighted
+snippet. RRF was chosen over score blending because bm25 and cosine are not comparable.
+Note FTS here ANDs all terms, so paraphrase queries return nothing from FTS and hybrid
+leans on the vector side; unchanged by this ADR. `SearchHit.rank` is lower-is-better in
+every mode (bm25, -cosine, -RRF). (5) `auto` mode = hybrid iff embeddings exist for the
+configured model (`CTX_EMBED_MODEL`) and the embedder loads, else FTS with a note;
+`CTX_EMBED_ON_SYNC=1` makes `ctx sync` embed afterwards (env var rather than a new
+config file; failures never fail the sync). (6) Rule 9 in code: a cloud embedder
+(`is_cloud=True`) skips events of `local_only=1` projects and unlinked events at embed
+time, and `retrieve` refuses to embed a query for it unless scoped to one `local_only=0`
+project (`LocalOnlyViolation`; tested with a fake cloud embedder). No cloud embedder
+ships; the providers milestone must register one through the same interface.
+(7) Measured on the synthetic 20-question set (33 events, k=10, `tests/fixtures`):
+real model2vec: fts recall 0.50 / MRR 0.50 / nDCG 0.50, vector 1.00 / 0.91 / 0.93,
+hybrid 1.00 / 0.93 / 0.95; the corpus is small and invented, so treat this as a smoke
+signal, not evidence for the personal set (M4/M9 gate still applies).
+
+### 2026-10-31 · ADR-028 · Eval harness format and metrics (M4)
+Eval sets are JSONL (not YAML: the stdlib parses it, so no new dependency, and one
+question per line diffs well): `id`, `question`, optional `filters`
+(`project|source|since|until`), `expect` citations (`source` + `session_id`, optional
+`message_id`), optional `expect_contains`. Relevance is judged on citations rather than
+event ids because event ids are database-local and change when the DB is rebuilt, while
+source/session/message ids are the source's own. Metrics: recall@k, MRR, nDCG@k with
+binary gain where each expected citation is credited once (duplicates earn nothing);
+`contains@k` is reported separately and does not affect ranking metrics. The harness
+scores `retrieve`, so any change to retrieval (including what `build_context` and MCP
+see) is measurable; scoring full budgeted packages is a later extension. The personal
+set lives under `CTX_HOME` and is never committed (rule 2); the committed set is
+synthetic.

@@ -12,6 +12,13 @@ from ctx.connectors.registry import available_connectors, export_connector
 from ctx.core import paths
 from ctx.core.context import build_context
 from ctx.core.db import connect
+from ctx.core.embed import (
+    EMBED_EXTRA_HINT,
+    EmbedderUnavailable,
+    embed_events,
+    embed_on_sync_enabled,
+    get_embedder,
+)
 from ctx.core.episodes import (
     build_timeline,
     local_day_bounds,
@@ -21,8 +28,10 @@ from ctx.core.episodes import (
     render_timeline,
     resolve_tz,
 )
+from ctx.core.evalset import EvalFileError, load_eval_set, run_eval
 from ctx.core.projects import list_projects, load_projects_config
-from ctx.core.search import parse_when, search
+from ctx.core.retrieve import NoEmbeddings, resolve_mode, retrieve
+from ctx.core.search import parse_when
 from ctx.core.status import collect_status, run_doctor
 from ctx.core.sync import SourceResult, dry_run, rebuild_fts
 from ctx.core.sync import sync as run_sync
@@ -36,6 +45,8 @@ app.add_typer(mcp_app, name="mcp")
 
 project_app = typer.Typer(help="Configured projects: roots, flags and stats.")
 app.add_typer(project_app, name="project")
+eval_app = typer.Typer(help="Retrieval evaluation against a question set.")
+app.add_typer(eval_app, name="eval")
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
@@ -139,8 +150,20 @@ def sync(
     except ValueError as exc:
         raise _fail(str(exc)) from exc
     _print_results(results)
+    if not dry_run_flag and embed_on_sync_enabled():
+        _embed_after_sync(conn)
     if any(r.status == "error" for r in results):
         raise typer.Exit(1)
+
+
+def _embed_after_sync(conn: sqlite3.Connection) -> None:
+    """CTX_EMBED_ON_SYNC=1: refresh embeddings; never fails the sync."""
+    try:
+        stats = embed_events(conn, get_embedder())
+    except EmbedderUnavailable as exc:
+        typer.echo(f"embed: skipped ({exc})", err=True)
+        return
+    typer.echo(f"embed: {stats.chunks_embedded} new chunks, {stats.total_chunks} total")
 
 
 @app.command("import")
@@ -228,14 +251,22 @@ def search_cmd(
     until: str = typer.Option(None, "--until"),
     all_projects: bool = typer.Option(False, "--all", help="Include non-allowed projects."),
     limit: int = typer.Option(20, "--limit", "-n", min=1),
+    mode: str = typer.Option(
+        "auto", "--mode", "-m", help="auto (hybrid if embeddings exist, else fts)|fts|vector|hybrid"
+    ),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Full-text search with citations (source, session, message, timestamp)."""
+    """Search with citations (source, session, message, timestamp): FTS5, vector or hybrid."""
     conn = _open_db_or_fail()
     try:
-        hits = search(
+        mode, embedder, note = resolve_mode(conn, mode)
+        if note:
+            typer.echo(f"note: {note}", err=True)
+        hits = retrieve(
             conn,
             query,
+            mode=mode,
+            embedder=embedder,
             project=project,
             source=source,
             since=parse_when(since) if since else None,
@@ -243,7 +274,7 @@ def search_cmd(
             include_all=all_projects,
             limit=limit,
         )
-    except (ValueError, sqlite3.OperationalError) as exc:
+    except (ValueError, sqlite3.OperationalError, EmbedderUnavailable, NoEmbeddings) as exc:
         raise _fail(str(exc)) from exc
     if as_json:
         typer.echo(json.dumps([asdict(h) for h in hits], indent=2, ensure_ascii=False))
@@ -258,6 +289,81 @@ def search_cmd(
             f"{_fmt_ts(c.ts)} project={c.project_id or '-'} [{h.kind}]"
         )
         typer.echo(f"  {h.snippet}")
+
+
+@app.command("embed")
+def embed_cmd(
+    rebuild: bool = typer.Option(False, "--rebuild", help="Drop this model's vectors first."),
+    model: str = typer.Option(None, "--model", help="Embedder spec (default $CTX_EMBED_MODEL)."),
+) -> None:
+    """Build/refresh the derived `embeddings` table (local model, redacted text only).
+
+    Incremental by text hash: unchanged chunks are not re-embedded. Needs the optional
+    extra (`uv sync --extra embed`); the first run downloads the model files.
+    """
+    conn = _open_db_or_fail()
+    try:
+        embedder = get_embedder(model)
+        stats = embed_events(conn, embedder, rebuild=rebuild)
+    except EmbedderUnavailable as exc:
+        raise _fail(f"{exc}\n{EMBED_EXTRA_HINT}", 1) from exc
+    typer.echo(
+        f"model {stats.model}: scanned {stats.events_scanned} events; "
+        f"{stats.chunks_embedded} chunks embedded, {stats.chunks_reused} reused, "
+        f"{stats.chunks_unchanged} unchanged; {stats.total_chunks} chunks total"
+    )
+
+
+@eval_app.command("run")
+def eval_run(
+    file: Path = typer.Argument(..., help="Eval set (JSONL); see docs/CONTEXT_ENGINEERING.md."),
+    mode: str = typer.Option("all", "--mode", "-m", help="all|fts|vector|hybrid"),
+    k: int = typer.Option(10, "--k", min=1),
+    model: str = typer.Option(None, "--model", help="Embedder spec for vector/hybrid."),
+    all_projects: bool = typer.Option(False, "--all", help="Include non-allowed projects."),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Score retrieval modes: recall@k, MRR, nDCG@k (side by side with --mode all)."""
+    conn = _open_db_or_fail()
+    modes = ["fts", "vector", "hybrid"] if mode == "all" else [mode]
+    if any(m not in ("fts", "vector", "hybrid") for m in modes):
+        raise _fail(f"unknown mode {mode!r}; use all, fts, vector or hybrid")
+    try:
+        questions = load_eval_set(file.expanduser())
+    except (EvalFileError, OSError) as exc:
+        raise _fail(str(exc)) from exc
+    reports, skipped = [], {}
+    embedder = None
+    for m in modes:
+        try:
+            if m != "fts" and embedder is None:
+                embedder = get_embedder(model)
+            reports.append(
+                run_eval(conn, questions, mode=m, k=k, embedder=embedder, include_all=all_projects)
+            )
+        except (EmbedderUnavailable, NoEmbeddings) as exc:
+            if mode != "all":
+                raise _fail(str(exc)) from exc
+            skipped[m] = str(exc)
+        except (ValueError, sqlite3.OperationalError) as exc:
+            raise _fail(str(exc)) from exc
+    if as_json:
+        data = {"k": k, "modes": [asdict(r) for r in reports], "skipped": skipped}
+        typer.echo(json.dumps(data, indent=2, ensure_ascii=False))
+        return
+    typer.echo(f"{len(questions)} questions, k={k}")
+    typer.echo(f"{'MODE':<8} {'RECALL@K':>9} {'MRR':>7} {'NDCG@K':>8} {'CONTAINS@K':>11}")
+    for r in reports:
+        contains = f"{r.contains:.3f}" if r.contains is not None else "-"
+        typer.echo(f"{r.mode:<8} {r.recall:>9.3f} {r.mrr:>7.3f} {r.ndcg:>8.3f} {contains:>11}")
+    for m, why in skipped.items():
+        typer.echo(f"{m}: skipped ({why})")
+    if len(reports) > 1:
+        typer.echo("\nfirst relevant rank per question (- = not in top k)")
+        typer.echo(f"{'QUESTION':<24} " + " ".join(f"{r.mode:>7}" for r in reports))
+        for i, q in enumerate(questions):
+            ranks = [reports[j].questions[i].first_rank for j in range(len(reports))]
+            typer.echo(f"{q.id:<24} " + " ".join(f"{(x or '-')!s:>7}" for x in ranks))
 
 
 @app.command("context")

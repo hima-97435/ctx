@@ -85,9 +85,8 @@ def resolve_project(conn: sqlite3.Connection, project: str) -> str:
     return row["id"]
 
 
-def search(
+def build_filters(
     conn: sqlite3.Connection,
-    query: str,
     *,
     project: str | None = None,
     source: str | None = None,
@@ -95,15 +94,11 @@ def search(
     until: int | None = None,
     include_all: bool = False,
     exclude_mcp: bool = False,
-    limit: int = 20,
-    include_text: bool = False,
-) -> list[SearchHit]:
-    """Ranked (bm25) matches with snippets and citations. `since`/`until` are epoch ms.
-
-    `exclude_mcp=True` additionally drops projects with `mcp_exclude=1` (used by the MCP server).
-    """
-    where = ["events_fts MATCH ?"]
-    params: list[object] = [fts_query(query)]
+) -> tuple[list[str], list[object]]:
+    """WHERE clauses over aliases `e` (events) and `s` (sessions), shared by every
+    retrieval mode so filters and visibility apply identically (FTS, vector, hybrid)."""
+    where: list[str] = []
+    params: list[object] = []
     if project is not None:
         where.append("COALESCE(s.project_id, e.project_id) = ?")
         params.append(resolve_project(conn, project))
@@ -125,36 +120,91 @@ def search(
     if until is not None:
         where.append("e.ts <= ?")
         params.append(until)
+    return where, params
+
+
+_HIT_COLUMNS = (
+    "e.id, e.source, e.source_id, e.ts, e.kind, e.role, e.message_id, e.session_id,"
+    " s.source_session_id, COALESCE(s.project_id, e.project_id) AS pid, e.token_estimate,"
+    " e.text AS full_text"
+)
+
+
+def _make_hit(r: sqlite3.Row, snippet: str, rank: float, include_text: bool) -> SearchHit:
+    return SearchHit(
+        citation=Citation(
+            source=r["source"],
+            session_id=r["session_id"],
+            source_session_id=r["source_session_id"],
+            message_id=r["message_id"],
+            event_id=r["id"],
+            source_id=r["source_id"],
+            ts=r["ts"],
+            project_id=r["pid"],
+        ),
+        kind=r["kind"],
+        role=r["role"],
+        snippet=redact(snippet),
+        rank=rank,
+        token_estimate=r["token_estimate"],
+        text=redact(r["full_text"]) if include_text else None,
+    )
+
+
+def hits_for_events(
+    conn: sqlite3.Connection, scored: list[tuple[int, str, float]], *, include_text: bool = False
+) -> list[SearchHit]:
+    """Build hits (in the given order) for `(event_id, snippet, rank)` triples. The caller
+    has already applied filters; this only loads the rows."""
+    if not scored:
+        return []
+    ids = [eid for eid, _, _ in scored]
+    rows = {
+        r["id"]: r
+        for r in conn.execute(
+            f"SELECT {_HIT_COLUMNS} FROM events e LEFT JOIN sessions s ON s.id = e.session_id"
+            f" WHERE e.id IN ({','.join('?' * len(ids))})",
+            ids,
+        )
+    }
+    return [_make_hit(rows[eid], snip, rank, include_text) for eid, snip, rank in scored]
+
+
+def search(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    project: str | None = None,
+    source: str | None = None,
+    since: int | None = None,
+    until: int | None = None,
+    include_all: bool = False,
+    exclude_mcp: bool = False,
+    limit: int = 20,
+    include_text: bool = False,
+) -> list[SearchHit]:
+    """FTS5-only ranked (bm25) matches with snippets and citations (the `fts` mode of
+    `ctx.core.retrieve.retrieve`). `since`/`until` are epoch ms.
+
+    `exclude_mcp=True` additionally drops projects with `mcp_exclude=1` (used by the MCP server).
+    """
+    where, params = build_filters(
+        conn,
+        project=project,
+        source=source,
+        since=since,
+        until=until,
+        include_all=include_all,
+        exclude_mcp=exclude_mcp,
+    )
+    where.insert(0, "events_fts MATCH ?")
+    params.insert(0, fts_query(query))
     sql = (
-        "SELECT e.id, e.source, e.source_id, e.ts, e.kind, e.role, e.message_id, e.session_id,"
-        " s.source_session_id, COALESCE(s.project_id, e.project_id) AS pid, e.token_estimate,"
-        " snippet(events_fts, 0, '«', '»', '…', 24) AS snip, bm25(events_fts) AS rank,"
-        " e.text AS full_text"
+        f"SELECT {_HIT_COLUMNS}, snippet(events_fts, 0, '«', '»', '…', 24) AS snip,"
+        " bm25(events_fts) AS rank"
         " FROM events_fts JOIN events e ON e.id = events_fts.rowid"
         " LEFT JOIN sessions s ON s.id = e.session_id"
         f" WHERE {' AND '.join(where)} ORDER BY rank, e.ts, e.id LIMIT ?"
     )
     params.append(max(limit, 0))
-    hits = []
-    for r in conn.execute(sql, params):
-        hits.append(
-            SearchHit(
-                citation=Citation(
-                    source=r["source"],
-                    session_id=r["session_id"],
-                    source_session_id=r["source_session_id"],
-                    message_id=r["message_id"],
-                    event_id=r["id"],
-                    source_id=r["source_id"],
-                    ts=r["ts"],
-                    project_id=r["pid"],
-                ),
-                kind=r["kind"],
-                role=r["role"],
-                snippet=redact(r["snip"]),
-                rank=r["rank"],
-                token_estimate=r["token_estimate"],
-                text=redact(r["full_text"]) if include_text else None,
-            )
-        )
-    return hits
+    return [_make_hit(r, r["snip"], r["rank"], include_text) for r in conn.execute(sql, params)]

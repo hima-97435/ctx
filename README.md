@@ -28,7 +28,14 @@ from raw data. Anything that assembles context for an LLM goes through one seam
 ```sh
 brew install uv     # or: pip install uv
 uv sync             # creates .venv, installs deps, writes uv.lock
+uv sync --extra embed   # optional: local embeddings (model2vec + numpy) for vector/hybrid search
 ```
+
+The base install is FTS5-only and needs nothing else. With the `embed` extra,
+`ctx embed` builds a derived, rebuildable `embeddings` table from redacted text using a
+small local model (no torch, no cloud; the first run downloads the model files from the
+Hugging Face hub into its normal cache), and search becomes hybrid (FTS5 + vector,
+fused with Reciprocal Rank Fusion).
 
 ## Quick start
 
@@ -40,13 +47,23 @@ ctx sync --source hermes      # one source; an absent (not installed) one is an 
 ctx sync --full               # ignore incremental state and re-read everything
 ctx status [--json]           # per source: installed?, path, last sync, sessions/events; DB path
 ctx doctor [--json]           # FTS integrity, schema version, FTS5, writable data dir (+ fixes)
-ctx search "redaction pipeline" --project ctx [--source S --since 7d --until DATE --all --limit N --json]
+ctx search "redaction pipeline" --project ctx [--source S --since 7d --until DATE --all --limit N --mode auto|fts|vector|hybrid --json]
+ctx embed [--rebuild] [--model SPEC]   # build/refresh embeddings (needs the `embed` extra); incremental by text hash
+ctx eval run FILE [--mode all|fts|vector|hybrid] [--k 10] [--model SPEC] [--all] [--json]   # recall@k / MRR / nDCG@k
 ctx context "redaction pipeline" --project ctx --budget 2000   # budgeted, cited context
 ctx reindex [--gap MIN]       # rebuild the FTS index and the episodes from events
 ctx timeline [--day today|yesterday|YYYY-MM-DD] [--project X --source S --since 7d --until DATE --tz Europe/Berlin --all --limit N --json]
 ctx project list [--json]     # projects: allowed / local_only / mcp_exclude, sessions, events, last activity
 ctx project show NAME [--json]
 ```
+
+`--mode auto` (the default for `search`, `context` and MCP) is hybrid once embeddings exist
+for the configured model (`$CTX_EMBED_MODEL`, default `model2vec:minishlab/potion-base-8M`)
+and its embedder loads, otherwise FTS5; `vector`/`hybrid` fail with an actionable message
+when the extra or the embeddings are missing. Set `CTX_EMBED_ON_SYNC=1` to have `ctx sync`
+refresh embeddings afterwards (skipped with a note if the extra is not installed).
+`ctx eval` scores retrieval against a question set; see `docs/CONTEXT_ENGINEERING.md` for
+the file format and how to write a personal set (kept under `CTX_HOME`, never committed).
 
 `ctx timeline` answers "what was I working on last Tuesday?": per local day and project,
 the time span, sources, session titles, message / tool-call counts, and the top files

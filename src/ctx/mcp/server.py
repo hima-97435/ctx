@@ -30,7 +30,8 @@ from ctx.core.episodes import (
 )
 from ctx.core.projects import load_projects_config
 from ctx.core.redact import redact
-from ctx.core.search import parse_when, resolve_project, search
+from ctx.core.retrieve import retrieve
+from ctx.core.search import parse_when, resolve_project
 from ctx.core.sync import sync as run_sync
 from ctx.core.truncate import truncate_to_tokens
 
@@ -96,7 +97,7 @@ def tool_search(
     limit: int = 10,
 ) -> str:
     _check_source(source)
-    hits = search(
+    hits = retrieve(
         conn,
         query,
         project=_visible_project(conn, project),

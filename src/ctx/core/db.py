@@ -176,12 +176,30 @@ _MIGRATION_0005_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX episode_events_event_idx ON episode_events(event_id)",
 )
 
+# Embedding vectors: derived from redacted `events.text`, rebuildable (`ctx embed --rebuild`),
+# safe to drop. One row per (event, chunk, model) (ADR-027).
+_MIGRATION_0006_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE embeddings (
+      event_id   INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      chunk_idx  INTEGER NOT NULL,
+      model      TEXT NOT NULL,
+      dim        INTEGER NOT NULL,
+      vector     BLOB NOT NULL,
+      text_hash  TEXT NOT NULL,
+      PRIMARY KEY (event_id, chunk_idx, model)
+    )
+    """,
+    "CREATE INDEX embeddings_hash_idx ON embeddings(model, text_hash)",
+)
+
 MIGRATIONS: list[tuple[str, tuple[str, ...]]] = [
     ("0001_initial", _MIGRATION_0001_STATEMENTS),
     ("0002_event_message_id", _MIGRATION_0002_STATEMENTS),
     ("0003_project_mcp_exclude", _MIGRATION_0003_STATEMENTS),
     ("0004_sync_state", _MIGRATION_0004_STATEMENTS),
     ("0005_episodes_nullable_project", _MIGRATION_0005_STATEMENTS),
+    ("0006_embeddings", _MIGRATION_0006_STATEMENTS),
 ]
 
 

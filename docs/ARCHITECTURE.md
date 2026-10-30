@@ -44,6 +44,13 @@ end — never collectors, never linkers.
    blob files. Never edited, never deleted (except explicit user purge of `data/`).
 2. **Searchable index** — FTS5 virtual table over `events.text`. Fully rebuildable
    from `events` alone (`ctx reindex`). No source of truth lives here.
+   **Embeddings** (optional, ADR-027) are a second derived index: table `embeddings`
+   (one row per event chunk and model), computed only from redacted text by a local
+   embedder, rebuildable with `ctx embed --rebuild`. `core/retrieve.py` is the single
+   ranking path (FTS5, vector, or hybrid via Reciprocal Rank Fusion); `ctx search`,
+   `build_context`, MCP `search`/`get_context` and `ctx eval` all call it, with filters
+   and visibility applied identically in every mode. A cloud embedder may never be used
+   for a `local_only=1` project (checked in code; none exists yet).
 3. **Synthesized memory** — episodes (deterministic time-bucketed groupings) and
    facts (LLM-extracted, later). Every fact links to `evidence_event_ids` and carries
    status `suggested | confirmed | abandoned`. Dropped and rebuilt from raw events at
@@ -200,7 +207,8 @@ build_context(conn, query: str, budget_tokens: int, project: str | None = None, 
 the best hit is trimmed head+tail to fit when nothing else would, and text is
 re-redacted before it is returned. `conn` is the DB handle the seam reads from.
 
-v1 behavior is deliberately dumb: top-N FTS5 hits trimmed to budget using
+v1 behavior is deliberately dumb: top-N hits (from `retrieve`: hybrid when embeddings
+exist, else FTS5) trimmed to budget using
 `token_estimate`. Pruning, compaction, reranking, rolling summaries, and budget
 allocation are deferred (`docs/CONTEXT_ENGINEERING.md`) and will swap in behind
 this interface without touching callers. Evidence IDs are always returned so detail

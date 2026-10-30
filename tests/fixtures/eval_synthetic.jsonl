@@ -1,0 +1,21 @@
+# Synthetic eval set for tests/fixtures/eval_corpus.py. Run with --all (web chats are unlinked).
+{"id": "para-signed-out", "question": "why were users getting signed out so quickly", "expect": [{"source": "claude_code", "session_id": "cc1"}]}
+{"id": "para-reports-faster", "question": "how did we make the reports page faster", "expect": [{"source": "claude_code", "session_id": "cc2"}]}
+{"id": "para-webhook-retry", "question": "retry failed webhook calls with increasing delays", "expect": [{"source": "codex", "session_id": "cx1"}], "filters": {"source": "codex"}}
+{"id": "para-laggy-filter", "question": "typing in the filter makes the dashboard sluggish", "expect": [{"source": "opencode", "session_id": "oc1"}], "filters": {"project": "beta"}}
+{"id": "para-ci-speed", "question": "speed up continuous integration builds", "expect": [{"source": "codex", "session_id": "cx3"}]}
+{"id": "para-csv-bom", "question": "handle spreadsheet duplicate entries and Excel byte order mark", "expect": [{"source": "opencode", "session_id": "oc4"}]}
+{"id": "err-docker-solve", "question": "failed to solve: process \"/bin/sh -c pip install -r requirements.txt\" did not complete successfully", "expect": [{"source": "claude_code", "session_id": "cc4", "message_id": "m1"}]}
+{"id": "err-enospc-watchers", "question": "System limit for number of file watchers reached", "expect": [{"source": "opencode", "session_id": "oc3", "message_id": "m1"}]}
+{"id": "err-mypy-optional", "question": "Argument 1 to \"parse_invoice\" has incompatible type \"Optional[str]\"", "expect": [{"source": "codex", "session_id": "cx2", "message_id": "m1"}]}
+{"id": "err-pg-config", "question": "pg_config executable not found", "expect": [{"source": "claude_code", "session_id": "cc4", "message_id": "m3"}]}
+{"id": "err-enospc-code", "question": "ENOSPC", "expect": [{"source": "opencode", "session_id": "oc3"}]}
+{"id": "file-orders-migration", "question": "migrations/0042_add_orders_index.sql", "expect": [{"source": "claude_code", "session_id": "cc2", "message_id": "m2"}]}
+{"id": "file-dispatcher", "question": "webhooks/dispatcher.py", "expect": [{"source": "codex", "session_id": "cx1", "message_id": "m2"}]}
+{"id": "file-datatable", "question": "components/DataTable.tsx", "expect": [{"source": "opencode", "session_id": "oc1", "message_id": "m2"}]}
+{"id": "file-session-py", "question": "src/auth/session.py", "expect": [{"source": "claude_code", "session_id": "cc1", "message_id": "m2"}]}
+{"id": "why-sqlite", "question": "why did I choose SQLite instead of Postgres for the job queue", "expect": [{"source": "claude_code", "session_id": "cc3"}]}
+{"id": "why-vite", "question": "why did we pick Vite over webpack", "expect": [{"source": "opencode", "session_id": "oc2"}], "filters": {"source": "opencode"}}
+{"id": "why-psycopg2-binary", "question": "why psycopg2-binary rather than installing libpq-dev", "expect": [{"source": "claude_code", "session_id": "cc4", "message_id": "m2"}]}
+{"id": "why-jitter", "question": "why add jitter to the retry backoff", "expect": [{"source": "codex", "session_id": "cx1", "message_id": "m2"}]}
+{"id": "why-mit-license", "question": "which license did I decide on for my CLI tool and why", "expect": [{"source": "chatgpt", "session_id": "gp3", "message_id": "m2"}]}

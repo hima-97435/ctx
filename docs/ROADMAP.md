@@ -107,9 +107,30 @@ Later in this family: Hermes, Gemini CLI.
 
 ## M4 — Eval set
 
-- [ ] 15–20 real questions from my history with known answers + source event IDs
-      recorded in-repo (anonymized).
-- [ ] A harness scores any `build_context` strategy against the set.
+- [x] Harness: `ctx eval run FILE [--mode fts|vector|hybrid|all] [--k 10] [--json]` reports
+      recall@k, MRR and nDCG@k per retrieval mode, side by side (ADR-028). It scores
+      `retrieve`, the single ranking path under `build_context`.
+- [x] Synthetic multi-source corpus + 20 questions (paraphrase, exact error strings, file
+      names, "why did I choose X") in `tests/fixtures/`; CI compares modes with a
+      deterministic fake embedder.
+- [ ] 15–20 **real** questions from my history with known answers, kept in
+      `<CTX_HOME>/eval/` (never committed; see `docs/CONTEXT_ENGINEERING.md`). User task.
+- [ ] Extend the harness to score whole `build_context` packages (token budget effects),
+      not just retrieval ranking.
+
+## M4.5 — Hybrid search (embeddings)
+
+- [x] Derived `embeddings` table (migration 0006), chunked redacted text only, rebuildable;
+      `ctx embed [--rebuild] [--model]`, incremental by text hash; optional
+      `CTX_EMBED_ON_SYNC=1`.
+- [x] Local embedder via optional extra `embed` (model2vec, ADR-027); base install stays
+      FTS-only with a clear message.
+- [x] `ctx search --mode auto|fts|vector|hybrid`; hybrid = RRF(FTS, vector, k=60); filters
+      identical in all modes; `build_context` and MCP use the same `retrieve`.
+- [x] Cloud embedders are refused for `local_only=1` projects (interface + test with a
+      fake cloud embedder); no cloud embedder ships until the providers milestone.
+- [ ] sqlite-vec / ANN index when brute force gets slow (not needed at current scale).
+- [ ] Tune chunk size, RRF k, and model choice on the real personal eval set.
 
 ## M5 — Synthesis with evidence links
 
@@ -143,7 +164,8 @@ Later in this family: Hermes, Gemini CLI.
 ## M9 — Context engineering behind the seam
 
 - [ ] Techniques from `docs/CONTEXT_ENGINEERING.md` adopted only after beating v1
-      on the M4 eval set.
+      on the M4 eval set (hybrid retrieval is the first, measured on the synthetic set
+      in ADR-027; confirm on the personal set).
 
 ## M10 — GUI (only if the CLI proves useful)
 

@@ -12,8 +12,15 @@ dependencies = [
 [project.scripts]
 ctx = "ctx.cli.main:app"
 
+[project.optional-dependencies]
+embed = [
+    "model2vec>=0.6",
+    "numpy>=1.26",
+]
+
 [dependency-groups]
 dev = [
+    "numpy>=1.26",
     "pytest>=8.0",
     "ruff>=0.4",
 ]
