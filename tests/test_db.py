@@ -28,6 +28,7 @@ def test_migrate_creates_full_schema(tmp_path):
         "0002_event_message_id",
         "0003_project_mcp_exclude",
         "0004_sync_state",
+        "0005_episodes_nullable_project",
     }
 
 
@@ -36,7 +37,7 @@ def test_migrate_is_idempotent(tmp_path):
     conn1 = connect(path)
     conn2 = connect(path)  # reopen same file: must not re-apply or fail
     count = conn2.execute("SELECT count(*) FROM schema_migrations").fetchone()[0]
-    assert count == 4
+    assert count == 5
     assert conn1 is not conn2
 
 

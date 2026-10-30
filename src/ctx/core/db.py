@@ -149,11 +149,39 @@ _MIGRATION_0004_STATEMENTS: tuple[str, ...] = (
     """,
 )
 
+# Episodes may belong to no project (web-chat imports have no cwd), so project_id becomes
+# nullable. Derived and rebuildable (`ctx reindex`), so dropping is safe (ADR-026).
+_MIGRATION_0005_STATEMENTS: tuple[str, ...] = (
+    "DROP TABLE episode_events",
+    "DROP TABLE episodes",
+    """
+    CREATE TABLE episodes (
+      id            INTEGER PRIMARY KEY,
+      project_id    TEXT REFERENCES projects(id),
+      start_ts      INTEGER NOT NULL,
+      end_ts        INTEGER NOT NULL,
+      summary       TEXT,
+      summary_model TEXT,
+      created_at    TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE episode_events (
+      episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+      event_id   INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      PRIMARY KEY (episode_id, event_id)
+    )
+    """,
+    "CREATE INDEX episodes_project_idx ON episodes(project_id, start_ts)",
+    "CREATE INDEX episode_events_event_idx ON episode_events(event_id)",
+)
+
 MIGRATIONS: list[tuple[str, tuple[str, ...]]] = [
     ("0001_initial", _MIGRATION_0001_STATEMENTS),
     ("0002_event_message_id", _MIGRATION_0002_STATEMENTS),
     ("0003_project_mcp_exclude", _MIGRATION_0003_STATEMENTS),
     ("0004_sync_state", _MIGRATION_0004_STATEMENTS),
+    ("0005_episodes_nullable_project", _MIGRATION_0005_STATEMENTS),
 ]
 
 

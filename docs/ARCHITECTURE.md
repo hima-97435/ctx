@@ -49,7 +49,8 @@ end — never collectors, never linkers.
    status `suggested | confirmed | abandoned`. Dropped and rebuilt from raw events at
    any time.
 4. **Relationships** — deterministic only: project roots (longest-prefix cwd match),
-   sessions (native source sessions), episodes (same project + idle-gap threshold).
+   sessions (native source sessions), episodes (same project + idle-gap threshold,
+   all sources merged; ADR-026).
    **An LLM never decides what belongs together.**
 
 ## Data flow & invariants
@@ -177,7 +178,7 @@ class Connector(Protocol):
 `src/ctx/mcp/server.py` (`ctx serve-mcp`, stdio, `mcp` SDK `MCPServer`) is a thin,
 source-agnostic, read-only facade over `search`, `build_context` and plain session
 queries. Tools: `search`, `get_context`, `get_session`, `list_projects`,
-`recent_sessions`, and `sync` (runs the idempotent importer; writes only ctx's own
+`recent_sessions`, `timeline` (per-day, per-project history from episodes), and `sync` (runs the idempotent importer; writes only ctx's own
 DB/blobs). Visibility is fixed server-side: `allowed=1 AND mcp_exclude=0`; excluded
 projects look nonexistent and cannot be requested by argument. Every response is
 re-redacted and capped (`MAX_RESPONSE_TOKENS`, per-message cap in `get_session`).

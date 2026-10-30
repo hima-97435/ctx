@@ -88,11 +88,17 @@ Later in this family: Hermes, Gemini CLI.
 
 ## M2 — Timeline & episodes (deterministic, no LLM)
 
-- [ ] Episodes computed deterministically (same project + < 45 min idle gap,
-      configurable).
-- [ ] `ctx timeline [--since ...] [--project X]` renders a browsable history with
-      per-episode event counts and top terms.
-- [ ] `ctx project list | show <name>` shows roots, allow/local_only state, stats.
+- [x] Episodes computed deterministically (same project + < 45 min idle gap,
+      configurable via `CTX_EPISODE_GAP_MINUTES` / `ctx reindex --gap`; sources merged;
+      rebuilt by `ctx sync` and `ctx reindex`, same ids for same events; ADR-026).
+- [x] `ctx timeline [--project --source --since --until --day --tz --all --json]`
+      renders a browsable per-day, per-project history across all sources with message
+      and tool-call counts, session titles, and top files / commands (replacing the
+      originally planned "top terms", which were not derivable deterministically
+      without picking a tokenizer/stoplist; revisit with M5).
+- [x] `ctx project list | show <name>` shows roots, allow/local_only/mcp_exclude state,
+      stats.
+- [x] MCP `timeline` tool (read-only, redacted, `mcp_exclude` respected, capped).
 
 ## M3 — Handoff
 
@@ -119,7 +125,7 @@ Later in this family: Hermes, Gemini CLI.
 - [x] `ctx serve-mcp` (stdio, official `mcp` SDK) exposes `search`, `get_context`,
       `get_session`, `list_projects`, `recent_sessions` and an optional `sync` tool.
       Context only through `build_context`; all output re-redacted and size-capped.
-      Pulled forward ahead of M2 (ADR-022). `timeline` follows with M2.
+      Pulled forward ahead of M2 (ADR-022). `timeline` landed with M2 (ADR-026).
 - [x] `mcp_exclude` per-project opt-out; `ctx mcp config --client ...` prints (never
       writes) client config. Only the Claude Code snippet is verified.
 

@@ -143,7 +143,7 @@ they describe.
 ```sql
 CREATE TABLE episodes (
   id            INTEGER PRIMARY KEY,
-  project_id    TEXT NOT NULL REFERENCES projects(id),
+  project_id    TEXT REFERENCES projects(id),  -- NULL = events linked to no project
   start_ts      INTEGER NOT NULL,              -- epoch ms
   end_ts        INTEGER NOT NULL,
   summary       TEXT,                          -- LLM-generated later; NULL until then
@@ -173,6 +173,18 @@ Why: an **episode** is a deterministic grouping — same project, events separat
 < 45 min of idle time (configurable). Facts are the LLM layer; they must cite
 evidence and never assert a decision the user didn't make (`status` lifecycle).
 Both tables can be dropped and rebuilt from `events` alone.
+
+Episode rules (implemented in `core/episodes.py`, ADR-026): an event's project is
+`COALESCE(sessions.project_id, events.project_id)`; events of one project from **all
+sources** are sorted by `(ts, id)` and split wherever consecutive events are
+`>= gap` apart (default 45 min, so exactly 45:00 splits; `CTX_EPISODE_GAP_MINUTES` or
+`ctx reindex --gap`). Events with no project (web-chat imports) form one NULL-project
+bucket, shown only with `--all`. `episodes.id` is assigned 1..n ordered by
+`(start_ts, project_id, first event id)` on each rebuild, so unchanged events give
+identical ids; ids are not stable when new events arrive. `episode_events` lists every
+member event (all kinds). Migration `0005` made `project_id` nullable and added indexes.
+The timeline's per-day split, counts, titles, top files and commands are computed at
+query time from events and are not stored.
 
 ## Data directory layout
 

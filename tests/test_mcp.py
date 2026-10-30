@@ -77,6 +77,7 @@ def test_lists_all_tools():
         "list_projects",
         "recent_sessions",
         "sync",
+        "timeline",
     }
 
 

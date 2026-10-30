@@ -123,3 +123,59 @@ def relink_sessions(conn: sqlite3.Connection) -> None:
 
 def load_roots(conn: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(r["project_id"], r["root_path"]) for r in conn.execute("SELECT * FROM project_roots")]
+
+
+def project_stats(conn: sqlite3.Connection, project_id: str | None) -> dict:
+    """Counts for one project (None = events linked to no project), derived from the DB."""
+    cond = "IS NULL" if project_id is None else "= ?"
+    args: tuple = () if project_id is None else (project_id,)
+    ev = (
+        "FROM events e LEFT JOIN sessions s ON s.id = e.session_id"
+        f" WHERE COALESCE(s.project_id, e.project_id) {cond}"
+    )
+    n_sessions = conn.execute(
+        f"SELECT COUNT(*) FROM sessions WHERE project_id {cond}", args
+    ).fetchone()[0]
+    n_events, first, last = conn.execute(
+        f"SELECT COUNT(*), MIN(e.ts), MAX(e.ts) {ev}", args
+    ).fetchone()
+    by_source = {
+        r["source"]: r["n"]
+        for r in conn.execute(f"SELECT e.source, COUNT(*) AS n {ev} GROUP BY e.source", args)
+    }
+    n_episodes = conn.execute(
+        f"SELECT COUNT(*) FROM episodes WHERE project_id {cond}", args
+    ).fetchone()[0]
+    return {
+        "sessions": n_sessions,
+        "events": n_events,
+        "episodes": n_episodes,
+        "first_ts": first,
+        "last_ts": last,
+        "events_by_source": dict(sorted(by_source.items())),
+    }
+
+
+def list_projects(conn: sqlite3.Connection) -> list[dict]:
+    """Every configured project with flags, roots and stats, ordered by id."""
+    out = []
+    for p in conn.execute("SELECT * FROM projects ORDER BY id").fetchall():
+        roots = [
+            r["root_path"]
+            for r in conn.execute(
+                "SELECT root_path FROM project_roots WHERE project_id = ? ORDER BY root_path",
+                (p["id"],),
+            )
+        ]
+        out.append(
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "allowed": bool(p["allowed"]),
+                "local_only": bool(p["local_only"]),
+                "mcp_exclude": bool(p["mcp_exclude"]),
+                "roots": roots,
+                **project_stats(conn, p["id"]),
+            }
+        )
+    return out

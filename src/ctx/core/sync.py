@@ -22,6 +22,7 @@ from pathlib import Path
 from ctx.connectors.base import Connector, ConnectorError, assert_path_allowed
 from ctx.core import paths
 from ctx.core.blobs import BlobStore
+from ctx.core.episodes import rebuild_episodes
 from ctx.core.model import RawEvent, RawSession
 from ctx.core.projects import (
     ProjectConfig,
@@ -129,6 +130,7 @@ def sync(
             results.append(_sync_one(conn, connector, path, data, full=full))
         except (ConnectorError, OSError, sqlite3.Error) as exc:
             results.append(SourceResult(name, status="error", error=f"{type(exc).__name__}: {exc}"))
+    rebuild_episodes(conn)  # derived from events; cheap and keeps the timeline current
     return results
 
 

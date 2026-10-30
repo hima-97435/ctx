@@ -42,8 +42,19 @@ ctx status [--json]           # per source: installed?, path, last sync, session
 ctx doctor [--json]           # FTS integrity, schema version, FTS5, writable data dir (+ fixes)
 ctx search "redaction pipeline" --project ctx [--source S --since 7d --until DATE --all --limit N --json]
 ctx context "redaction pipeline" --project ctx --budget 2000   # budgeted, cited context
-ctx reindex                   # rebuild the FTS index from events
+ctx reindex [--gap MIN]       # rebuild the FTS index and the episodes from events
+ctx timeline [--day today|yesterday|YYYY-MM-DD] [--project X --source S --since 7d --until DATE --tz Europe/Berlin --all --limit N --json]
+ctx project list [--json]     # projects: allowed / local_only / mcp_exclude, sessions, events, last activity
+ctx project show NAME [--json]
 ```
+
+`ctx timeline` answers "what was I working on last Tuesday?": per local day and project,
+the time span, sources, session titles, message / tool-call counts, and the top files
+and commands (read from tool-call events). It spans all sources, shows only `allowed`
+projects (`--all` adds the rest and unlinked web chats), and stores UTC but displays in
+`--tz`, else `$CTX_TZ`, else the system zone. Bare dates in `--day/--since/--until` are
+local dates. Episodes (same project, events < 45 min apart, all sources merged) are
+derived and rebuilt on every `ctx sync` and by `ctx reindex`; no LLM is involved.
 
 Plain `ctx sync` **skips** sources whose storage does not exist (shown as
 `not installed`, exit 0) but still fails loud (exit 1) on a version-pin mismatch,
@@ -77,7 +88,7 @@ ctx mcp config --client codex         # also: opencode|cursor|gemini|hermes|gene
 
 `ctx mcp config` only prints; it never edits your client's config. Snippets other than
 Claude Code are marked UNVERIFIED. `ctx serve-mcp` runs a read-only stdio server with
-tools `search`, `get_context`, `get_session`, `list_projects`, `recent_sessions`, and
+tools `search`, `get_context`, `get_session`, `list_projects`, `recent_sessions`, `timeline`, and
 `sync` (imports into ctx's own database only). Results are redacted, cited, and capped
 at ~8k tokens. Hide a project from MCP with `mcp_exclude = true` in `projects.toml`;
 disallowed projects (e.g. Home) are never served. See ADR-022.

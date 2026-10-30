@@ -20,6 +20,14 @@ from ctx.connectors.registry import available_connectors
 from ctx.core import paths
 from ctx.core.context import build_context
 from ctx.core.db import connect
+from ctx.core.episodes import (
+    build_timeline,
+    local_day_bounds,
+    parse_day,
+    parse_local,
+    render_timeline,
+    resolve_tz,
+)
 from ctx.core.projects import load_projects_config
 from ctx.core.redact import redact
 from ctx.core.search import parse_when, resolve_project, search
@@ -37,8 +45,8 @@ VISIBLE_P = "p.allowed = 1 AND p.mcp_exclude = 0"
 INSTRUCTIONS = (
     "ctx is the user's local memory of past coding-agent sessions. Use search to find "
     "past discussions, get_context for a budgeted cited bundle, get_session to read a "
-    "conversation around a cited message. Results are redacted and cite "
-    "source/session/message ids."
+    "conversation around a cited message, timeline for what was worked on when. Results "
+    "are redacted and cite source/session/message ids."
 )
 
 
@@ -216,6 +224,38 @@ def tool_recent_sessions(
     )
 
 
+def tool_timeline(
+    conn: sqlite3.Connection,
+    project: str | None = None,
+    source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    day: str | None = None,
+    tz: str | None = None,
+    limit: int = 30,
+) -> str:
+    _check_source(source)
+    zone = resolve_tz(tz)
+    if day and (since or until):
+        raise ValueError("day cannot be combined with since/until")
+    if day:
+        lo, hi = local_day_bounds(parse_day(day, zone), zone)
+    else:
+        lo = parse_local(since, zone) if since else None
+        hi = parse_local(until, zone, end_of_day=True) if until else None
+    entries = build_timeline(
+        conn,
+        zone,
+        project=_visible_project(conn, project),
+        source=source,
+        since=lo,
+        until=hi,
+        exclude_mcp=True,
+        limit=_clamp_limit(limit),
+    )
+    return render_timeline(entries, zone)
+
+
 def tool_sync(conn: sqlite3.Connection, source: str | None = None) -> str:
     _check_source(source)
     results = run_sync(
@@ -289,6 +329,21 @@ def build_server() -> MCPServer:
     ) -> str:
         """Most recent sessions, newest first."""
         return _wrap(tool_recent_sessions)(project, source, limit)
+
+    @server.tool()
+    def timeline(
+        project: str | None = None,
+        source: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        day: str | None = None,
+        tz: str | None = None,
+        limit: int = 30,
+    ) -> str:
+        """What was the user working on? Per local day and project: time span, sources,
+        session titles, message counts, top files and commands. day is today, yesterday
+        or YYYY-MM-DD; since/until accept 7d or dates; tz is an IANA zone."""
+        return _wrap(tool_timeline)(project, source, since, until, day, tz, limit)
 
     @server.tool()
     def sync(source: str | None = None) -> str:

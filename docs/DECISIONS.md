@@ -236,3 +236,30 @@ deterministic guessing, rule 7). Claude.ai `projects.json` is surfaced only as
 `agent=project:<name>`. (8) Newest archive is processed first so its session metadata
 wins; unchanged archives are skipped via the size+mtime cursor (ADR-024). (9) Formats
 are reconstructed from public descriptions and verified only on synthetic fixtures.
+
+### 2026-10-31 · ADR-026 · Deterministic episodes and timeline (M2)
+No LLM anywhere (rule 7). (1) Project of an event = session's project, else the event's
+own. (2) Per project, events from all sources are merged by `(ts, id)` and split at a
+gap `>= 45 min` (strict `<` joins; boundary tested). Merging sources makes concurrent
+work in two agents one episode, which matches "what was I doing". The gap is global
+(`CTX_EPISODE_GAP_MINUTES`, `ctx reindex --gap`), not per project, to keep rebuilds
+trivially reproducible. (3) Unlinked events (web chats) get one NULL-project bucket
+rather than being dropped, so the timeline spans all sources; this required migration
+0005 (`episodes.project_id` nullable; derived tables, so drop+create is safe). Unlinked
+and non-`allowed` projects are hidden unless `--all` (same visibility as search); MCP
+never widens it and also honors `mcp_exclude`. (4) Rebuild is delete-all + insert with
+ids assigned in a canonical order, run at the end of every `ctx sync` and by `ctx
+reindex`; chosen over incremental maintenance because it is simple and provably equal to
+a from-scratch build (cost is one scan of events). Consequence: ids shift when new events
+arrive, so M5 facts must key on event ids / be regenerated, not on episode ids alone.
+(5) Time: stored UTC; display zone = `--tz`, else `$CTX_TZ`, else the system zone
+(resolved to an IANA zone via `$TZ` or `/etc/localtime` so DST is right; fixed offset as
+a last resort). Bare dates and naive datetimes in the timeline filters are local; this
+differs from `search`, where they are UTC. An episode crossing local midnight appears
+once per day with `<`/`>` continuation markers. (6) Top files / commands come from
+`tool:*` events whose text is `input: {json}` (keys `file_path|filePath|path|...`,
+`command|cmd`); this is source-agnostic but best effort: truncated or differently
+shaped tool text is skipped. Values are redacted and clipped; commands use the first
+line only. "Top terms" from the original roadmap was dropped (needs a stoplist; a
+heuristic would be an undocumented guess). On Windows the `zoneinfo` database needs the
+`tzdata` package for named zones; not added as a dependency yet.
