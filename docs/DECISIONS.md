@@ -124,3 +124,21 @@ rewrite. Search shows only `allowed=1` projects unless `--all`; events with no
 project are treated as not allowed (ADR-002/016). The engine re-redacts connector
 output as defense in depth. Every sync is a full pass over a fresh snapshot
 (incremental `time_updated` filtering is deferred; idempotency makes it safe).
+
+### 2026-10-31 · ADR-021 · Claude Code + Codex connectors (M1.5); roadmap order
+Adds sources `claude_code` and `codex` on the existing contract, before further
+roadmap items: the user's own coding-agent transcripts are the highest-value, lowest-risk
+data (plain append-only JSONL, no live-DB snapshot). Roadmap: new M1.5; MCP server (M6)
+stays ahead of Antigravity (M7); web chat exports are planned (M8, not started); Hermes
+and Gemini CLI follow in the same family. Choices: (1) separate `tool_result` kind
+rather than merging output into the call (these formats store call and result as
+separate records); (2) sidechain lines and bookkeeping/unknown line types are counted
+and skipped, never fatal, unknown *shape* of message records is fatal (ADR-011);
+(3) `jsonl_common.py` holds source-neutral helpers (line reading, redact-then-spill,
+stats) so each connector file stays source-specific; (4) `.zst` rollouts need the
+optional `zstandard` package, not a hard dependency; (5) `denylist_tables` is empty
+(file sources) and the contract suite's SQL-trace test is switched off via
+`expects_sql = False`; (6) incremental sync stays a full pass with idempotent inserts
+(ADR-020) - a size/mtime cache needs an engine state seam and is deferred. Codex shape
+is from public documentation only (no local rollouts to check); documented as unverified.
+

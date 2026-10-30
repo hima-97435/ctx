@@ -13,6 +13,10 @@ runner = CliRunner()
 def cli_env(tmp_path, monkeypatch):
     make_opencode_root(tmp_path / "oc")
     monkeypatch.setenv("CTX_SOURCE_ROOT_OPENCODE", str(tmp_path / "oc"))
+    for name in ("claude_code", "codex"):  # present but empty: nothing to import
+        root = tmp_path / f"empty_{name}"
+        (root / ("projects" if name == "claude_code" else "sessions")).mkdir(parents=True)
+        monkeypatch.setenv(f"CTX_SOURCE_ROOT_{name.upper()}", str(root))
     home = tmp_path / "ctx_home"
     home.mkdir(parents=True, exist_ok=True)
     (home / "projects.toml").write_text(PROJECTS_TOML)

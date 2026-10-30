@@ -114,6 +114,94 @@ full backfill (~6k parts, seconds).
 
 ---
 
+## 2a. Claude Code (M1.5, source name `claude_code`)
+
+Code: `src/ctx/connectors/claude_code.py` (shared line/redaction helpers in
+`jsonl_common.py`). Format is **unofficial**; shapes below were checked against a
+real install (key names/types only, 2026-10-31, Claude Code 2.1.x).
+
+| Path | What |
+|---|---|
+| `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` | append-only transcript, one JSON per line (**the only thing read**) |
+| `~/.claude/.credentials.json`, `~/.claude.json`, `settings*.json`, `config.json`, `history.jsonl`, `.env*` | **denylisted**, never opened |
+
+Allowed path: `~/.claude` (override root with `CTX_SOURCE_ROOT_CLAUDE_CODE`);
+default source path `~/.claude/projects`. Only `projects/*/*.jsonl` is globbed.
+Subagent files under `<session>/subagents/` are not read.
+
+**Observed line types** (counted in the dry-run report): `user`, `assistant`
+(imported) plus bookkeeping that is counted and skipped: `mode`, `permission-mode`,
+`atis-latch`, `last-prompt`, `ai-title` (used as session title), `tools-used`,
+`queue-operation`, `cost-state`, `file-history-snapshot/-delta`, `attachment`,
+`system`, `summary`, `api-request`, `api-request-blob`, `api-request-shape`. Any
+other `type` is counted as `unknown_type:<t>` and skipped. Message records carry
+`uuid, parentUuid, sessionId, timestamp (ISO), cwd, gitBranch, version,
+isSidechain, message{role, model, content}`. `content` is a string or blocks:
+`text`, `thinking` (mostly signature-only, empty text -> skipped), `tool_use{id,name,input}`,
+`tool_result{tool_use_id,content,is_error}` (content str or text blocks), `image`,
+`server_tool_use`, `advisor_tool_result` (skipped, counted as unknown block).
+
+| Claude Code | ctx |
+|---|---|
+| `sessionId` | `sessions.source_session_id`; `cwd` (first seen) -> project linking; `message.model` (last assistant); `ai-title` -> title; min/max `timestamp` -> started/ended |
+| line `uuid` | `events.message_id`; `events.source_id = "<uuid>:<block index>"` |
+| `timestamp` | `events.ts` (epoch ms) |
+| `text` / `thinking` / `image` | kinds `text` / `reasoning` / `file` (`[image: mime]`, data dropped) |
+| `tool_use` | `tool:<name>`, text = `input: <json>`, `call_id = id` |
+| `tool_result` | kind `tool_result`, `call_id = tool_use_id`, role `user`; if the call's input named `.env`/`*.pem`/`*.key`, whole output is file-redacted |
+| `isMeta`, `isCompactSummary` | `synthetic=1` |
+| `isSidechain=true` | skipped, counted |
+
+Quirks: resumed sessions copy earlier lines into a new file (same `uuid`) -> deduped
+in-run, and by `UNIQUE(source, source_id)` across runs; the last line of a live
+transcript may be torn (counted as malformed, picked up complete on the next sync);
+a `.env` read result with a known call id is redacted by file name. Large tool
+results (>64 KB) are redacted, then spilled to a blob.
+
+**Version pin** `claude-code-jsonl-v1[:cli-<version>]`: every `user`/`assistant`
+record in the head (200 lines) of every file must have `uuid`, `sessionId`, a
+parsable `timestamp` and `message.content`, lines must be JSON objects. Anything
+else -> `ConnectorError` before any write.
+
+**Incremental:** every sync is a full pass (ADR-020). An appended transcript adds
+only the new events (tested); a size/mtime skip-cache is deferred until the engine
+has a per-source state seam.
+
+## 2b. Codex CLI (M1.5, source name `codex`)
+
+Code: `src/ctx/connectors/codex.py`. **Not verified against real files**: no
+`~/.codex/sessions` exists on the dev machine (this Codex version keeps state in
+`~/.codex/*.sqlite`, which is denylisted and not read). Mapping follows the
+documented rollout format; verify with `python -m ctx.connectors.codex` on a
+machine that has rollouts.
+
+| Path | What |
+|---|---|
+| `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl` | one JSON per line `{timestamp, type, payload}` (**read**) |
+| `...jsonl.zst` | read only if the optional `zstandard` package is installed; else skipped with a warning (counted `zst_without_zstandard`) |
+| `~/.codex/auth.json`, `config.toml`, `config.json`, `installation_id`, `*.sqlite*` | **denylisted** |
+
+Allowed path `~/.codex` (override `CTX_SOURCE_ROOT_CODEX`); default source path
+`~/.codex/sessions`. Line 1 must be `session_meta{id, cwd, timestamp, originator,
+cli_version, instructions}` (`instructions` is never stored). `turn_context` supplies
+the model. `response_item` payloads are mapped; `event_msg` (duplicates), `turn_context`
+and unknown record/item types are counted and skipped.
+
+| Codex `response_item` | ctx |
+|---|---|
+| `message` (content `input_text`/`output_text`) | kind `text`; role user/assistant; `developer`/`system` -> role NULL, synthetic; `<environment_context>`, `<user_instructions>`, `# AGENTS.md instructions` -> synthetic |
+| `reasoning` | kind `reasoning` from `summary` (encrypted-only -> skipped) |
+| `function_call`, `custom_tool_call`, `local_shell_call` | `tool:<name>` (`local_shell`), `call_id` |
+| `function_call_output`, `custom_tool_call_output` | kind `tool_result`, `call_id`; sensitive-file reads (e.g. `cat .env`) file-redacted |
+
+`source_id = "<session id>:<line number>"` (items have no ids; files are
+append-only), `session.cwd = session_meta.cwd`.
+**Version pin** `codex-rollout-v1[:cli-<version>]`: the first line of every rollout
+must be a `session_meta` with a string `id`; older headerless rollouts or any other
+shape -> `ConnectorError` before writes.
+
+---
+
 ## 3. Antigravity (documented only — connector #2, after M1)
 
 Read-only Phase 0 inspection; **not parsed or imported yet**.

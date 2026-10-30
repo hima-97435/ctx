@@ -39,6 +39,9 @@ def _fetch(connector, source_path, tmp_path, blobs=None):
 
 
 class ConnectorContract:
+    # Set False for connectors that do not read SQLite (no SQL trace to inspect).
+    expects_sql = True
+
     # ---- fixtures to override -------------------------------------------------
     @pytest.fixture()
     def connector(self):
@@ -147,6 +150,9 @@ class ConnectorContract:
         monkeypatch.setattr(sqlite3, "connect", tracing_connect)
         _fetch(connector, source_path, tmp_path)
         monkeypatch.undo()
+        if not self.expects_sql:
+            assert not statements, "file-based connector must not open SQLite"
+            return
         assert statements, "expected to observe SQL for a sqlite-backed connector"
         for table in connector.denylist_tables:
             pattern = re.compile(rf"\b{re.escape(table)}\b", re.IGNORECASE)

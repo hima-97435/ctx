@@ -1,7 +1,7 @@
 # ctx
 
 A **local-first personal context engine**. ctx collects your scattered work context —
-coding-agent sessions (OpenCode today; Antigravity, VS Code, shell history later) —
+coding-agent sessions (OpenCode, Claude Code and Codex CLI today; Hermes, Gemini CLI, Antigravity, VS Code, shell history later) —
 into one SQLite database on your machine, and builds search, a timeline,
 evidence-backed Q&A, and agent handoffs on top of it.
 
@@ -60,6 +60,7 @@ CLI surface grows per milestone — see `docs/ROADMAP.md`.
 |---|---|
 | M0 — docs & scaffolding | done |
 | M1 — OpenCode import, search, `build_context` | implemented; prompt-history connector and `sources add` pending |
+| M1.5 — Claude Code + Codex connectors | implemented (`ctx sync --source claude_code\|codex`); Codex unverified on real files |
 | M2+ — timeline, handoff, synthesis, MCP | planned |
 
 See `docs/ROADMAP.md` for acceptance tests per milestone.

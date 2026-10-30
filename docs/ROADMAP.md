@@ -38,6 +38,23 @@ Done when all of these pass with tests:
       (top-N FTS5 trimmed to budget) and a unit test; returns evidence IDs and
       what was left out.
 
+## M1.5 — Coding-agent connectors: Claude Code, Codex
+
+Later in this family: Hermes, Gemini CLI.
+
+- [x] `claude_code` connector reads `~/.claude/projects/*/*.jsonl`: messages, text,
+      tool_use/tool_result (large outputs spill to blobs), cwd project linking,
+      sidechain/unknown line types counted and skipped, malformed lines tolerated.
+- [x] `codex` connector reads `~/.codex/sessions/**/rollout-*.jsonl` (`.zst` only if
+      `zstandard` is installed, else skipped with a warning).
+- [x] Both declare `schema_version_pin`, `allowed_paths`, `denylist_paths`; fail loud on
+      unknown shape; pass the shared contract suite; dry-run report via
+      `python -m ctx.connectors.<name>` and `ctx sync --dry-run`.
+- [x] Fake token in a message reaches `events`/FTS redacted; `ctx sync --source
+      claude_code|codex` is idempotent; an appended transcript adds only new events.
+- [ ] Codex verified against real rollout files (none on the dev machine yet).
+- [ ] Size/mtime skip-cache for incremental sync (needs an engine state seam).
+
 ## M2 — Timeline & episodes (deterministic, no LLM)
 
 - [ ] Episodes computed deterministically (same project + < 45 min idle gap,
@@ -66,7 +83,7 @@ Done when all of these pass with tests:
 - [ ] Cloud calls only for projects with `local_only=0` (all start `local_only=1`).
 - [ ] Derived tables provably rebuildable from `events` alone.
 
-## M6 — MCP server
+## M6 — MCP server (before Antigravity)
 
 - [ ] `ctx serve-mcp` exposes search/timeline/context to other agents via MCP,
       responses only through `build_context` (progressive disclosure allowed later).
@@ -79,6 +96,7 @@ Done when all of these pass with tests:
 ## M8 — VS Code + shell history connectors
 
 - [ ] As `docs/CONNECTORS.md` §4–5; pass contract suite.
+- [ ] Planned (not started): web chat exports (ChatGPT/Claude.ai export files) as a file-import connector.
 
 ## M9 — Context engineering behind the seam
 

@@ -87,7 +87,7 @@ CREATE TABLE events (
   project_id     TEXT REFERENCES projects(id),
   session_id     TEXT REFERENCES sessions(id),
   role           TEXT,                         -- 'user' | 'assistant' | NULL
-  kind           TEXT NOT NULL,                -- text | reasoning | tool:<name> | patch | file | compaction | prompt
+  kind           TEXT NOT NULL,                -- text | reasoning | tool:<name> | tool_result | patch | file | compaction | prompt
   call_id        TEXT,                         -- links a tool result to its call
   message_id     TEXT,                         -- source message id (migration 0002, ADR-018); citations
   synthetic      INTEGER NOT NULL DEFAULT 0,   -- system-injected content

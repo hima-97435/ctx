@@ -1,7 +1,7 @@
 """Registered connectors. The only place the CLI/engine learn which sources exist.
 
-`CTX_SOURCE_ROOT_<NAME>` (e.g. CTX_SOURCE_ROOT_OPENCODE) overrides a connector's
-source root — used by tests and sandboxed runs; the override becomes that
+`CTX_SOURCE_ROOT_<NAME>` (e.g. CTX_SOURCE_ROOT_CLAUDE_CODE) overrides a
+connector's source root — used by tests and sandboxed runs; the override becomes that
 connector's sole allowed path.
 """
 
@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 
 from ctx.connectors.base import Connector
+from ctx.connectors.claude_code import ClaudeCodeConnector
+from ctx.connectors.codex import CodexConnector
 from ctx.connectors.opencode import OpenCodeConnector
 
 
@@ -17,5 +19,9 @@ def available_connectors() -> dict[str, Connector]:
         override = os.environ.get(f"CTX_SOURCE_ROOT_{name.upper()}")
         return Path(override) if override else None
 
-    connectors: list[Connector] = [OpenCodeConnector(root_for("opencode"))]
+    connectors: list[Connector] = [
+        OpenCodeConnector(root_for("opencode")),
+        ClaudeCodeConnector(root_for("claude_code")),
+        CodexConnector(root_for("codex")),
+    ]
     return {c.name: c for c in connectors}

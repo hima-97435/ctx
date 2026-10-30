@@ -8,3 +8,5 @@ def _isolate_ctx_env(tmp_path, monkeypatch):
     monkeypatch.delenv("CTX_DATA_DIR", raising=False)
     monkeypatch.delenv("CTX_CONFIG", raising=False)
     monkeypatch.setenv("CTX_SOURCE_ROOT_OPENCODE", str(tmp_path / "no_opencode"))
+    monkeypatch.setenv("CTX_SOURCE_ROOT_CLAUDE_CODE", str(tmp_path / "no_claude"))
+    monkeypatch.setenv("CTX_SOURCE_ROOT_CODEX", str(tmp_path / "no_codex"))
